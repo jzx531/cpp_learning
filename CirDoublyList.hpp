@@ -18,16 +18,17 @@ class CirDoublyList
     public:
      DoubleNode<T> *head;
      CirDoublyList();
-     CirDoublyList(T values[],int n);
      CirDoublyList(const CirDoublyList<T> & list);
+     CirDoublyList(T values[],int n);
+    //  CirDoublyList(const CirDoublyList<T> & list);
      ~CirDoublyList();
 
      bool empty() const;
      int count() const;
      T & get(int i);
-     virtual void set(int i, T x);
-        template <typename U>
-        friend std::ostream& operator<<(std::ostream& os, const CirDoublyList<U>& list);
+    virtual void set(int i, T x);
+    template <typename U>
+    friend std::ostream& operator<<(std::ostream& os, const CirDoublyList<U>& list);
     //  friend std::ostream & operator<<(std::ostream & os, 
     //                                  const CirDoublyList<T> & list);
      void printPreviews();
@@ -39,6 +40,8 @@ class CirDoublyList
      virtual void operator+=(CirDoublyList<T> & list);
      T operator[](int i);
 };
+
+
 
 template <typename T>
 CirDoublyList<T>::CirDoublyList()
@@ -185,13 +188,21 @@ template <typename T>
 DoubleNode<T> * CirDoublyList<T>::insert(T x)
 {
     DoubleNode<T> *p = new DoubleNode<T>(x);
-    // DoubleNode<T> *tail = new DoubleNode<T>();
-    // tail = head->prev;
-    DoubleNode<T> *tail = head->prev;
-    p->prev = tail;
-    p->next = head;
-    tail->next = p;
-    head->prev = p;
+    if(empty())
+    {
+        p->prev = head;
+        head->next = p;
+        head->prev = p;
+        p->next = head;
+    }
+    else 
+    {
+        DoubleNode<T> *tail = head->prev;
+        p->prev = tail;
+        p->next = head;
+        tail->next = p;
+        head->prev = p;
+    }
     return p;
 }
 
@@ -257,6 +268,8 @@ void CirDoublyList<T>::removeAll()
         p = p->next;
         delete tmp;
     }
+    delete head;
+    head = new DoubleNode<T>();
     head->next = head;
     head->prev = head;
 }

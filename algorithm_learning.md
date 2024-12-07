@@ -1070,3 +1070,44 @@ void threadBtree<T>::postOrderThread(threadNode<T>* node,threadNode<T> *&front)
     return;
 }
 ```
+汉诺塔问题
+```c++
+#include<iostream>
+#include"Stack.hpp"
+
+Stack<int> tower[4];
+void moveAndShow(int n,int x,int y,int z)
+{
+    if(n>0)
+    {
+        
+        moveAndShow(n-1,x,z,y);
+        int d=tower[x].top();
+        tower[x].pop();
+        tower[y].push(d);
+        for (int i = 1; i <4; i++)
+        {
+            if (!tower[i].empty())
+            {
+                std::cout << i << ": ";
+                std::cout << tower[i];
+            }
+        }
+        moveAndShow(n-1,z,y,x);
+    }
+    return;
+}
+
+void towerOfHanoi(int n)
+{
+    for(int i=n;i>0;i--)
+    {
+        tower[1].push(i);
+    }
+    for (int i = 1; i <= 3; i++)
+    {
+        std::cout << "Tower " << i << ": " << tower[i] << std::endl;
+    }
+    moveAndShow(n,1,2,3);
+}
+```

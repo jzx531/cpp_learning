@@ -57,65 +57,45 @@
 // }
 
 
+
+
 // #include <iostream>
+// #include "Btree.hpp"
+// #include "Huffmantree(Btree).hpp"
+
+// #include "CirDoublyList.hpp"
 // #include "Stack.hpp"
 
 // int main() {
-//     Stack<int> s;
-//     s.push(1);
-//     s.push(2);
-//     s.push(3);
-//     s.push(4);
-//     s.push(5);
 
-//     std::cout<<s;
-
-//     // s.peek(); // 输出栈顶元素
-//     while (!s.isEmpty()) {
-//         std::cout << s.rear() << " ";
-//         s.peek();
+//     int a[] = {1,2,3,4};
+//     HuffmanTree<int> ht(a, 4);
+//     ht.inorder();
+//     std::cout << '\n';
+//     ht.levelOrder();
+//     std::string code[4];
+//     int freq[4] = {1,2,5,7};
+//     Node<int>* OUT[10];
+//     int length = 0;
+//     ht.find(2, OUT,length);
+//     std::cout << "length: " << length << '\n';
+//     for (int i = 0; i < length; i++) {
+//         std::cout << OUT[i]->value << " ";
 //     }
-//     std::cout << std::endl;
+//     std::cout << '\n';
+
+//     printHuffmanCode(a, 4,code);
+
+//     std::string decoder = "011101100";
+//     std::string decoded = ht.decode(decoder, 9);
+//     std::cout << "decoded: " << decoded << '\n';
 
 //     return 0;
 // }
 
+#include "CirDoublyList.hpp"
 #include <iostream>
-#include "threadBtree.hpp"
 
-int main() {
-    // threadBtree<int> t;
-    // t.insert(5);
-    // t.insert(2);
-    // t.insert(7);
-    // t.insert(1);
-    // t.insert(3);
-    // t.insert(6);
-    // t.insert(4);
-    // t.insert(8);
-    // t.inOrderThread();
-    // t.insert_after_inThreading(0);
-    // t.insert_after_inThreading(9);
-    // t.levelOrder();
-    // std::cout << '\n';
+int main() {                                      
 
-    std::cout <<"normal inOrderThread:"<<'\n';
-    threadBtree<int> newt;
-    newt.insert(5);
-    newt.insert(2);
-    newt.insert(7);
-    newt.insert(1);
-    newt.insert(3);
-    newt.insert(6);
-    newt.insert(4);
-    newt.insert(8);
-    // std::cout << newt.remove(2)<<'\n';
-    // std::cout << newt.remove(7)<<'\n';
-    // std::cout << newt.remove(5)<<'\n';
-    newt.postOrderThread();
-
-    newt.levelOrder();
-    newt.inOrder();
-
-    return 0;
 }

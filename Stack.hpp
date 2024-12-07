@@ -6,10 +6,11 @@ template<typename T>
 class Stack:public CirDoublyList<T>{
 public:
     Stack():CirDoublyList<T>(){};
+    Stack(const Stack<T>& stack):CirDoublyList<T>(stack){};
     ~Stack();
     bool isEmpty() const;
     // bool isFull() const;
-    void push(int data);
+    void push(T data);
     T pop();
     T peek();
     T top() const;
@@ -31,7 +32,7 @@ bool Stack<T>::isEmpty() const{
 }
 
 template<typename T>
-void Stack<T>::push(int data){
+void Stack<T>::push(T data){
     this->insert(data);
 }
 
@@ -76,12 +77,17 @@ T Stack<T>::rear() const{
 template<typename T>
 std::ostream& operator<<(std::ostream& os,  Stack<T> stack){
     os << "Stack: ";
+    /*
     while (!stack.isEmpty())
     {
         os << stack.top() << " ";
         stack.pop();
+    }*/
+   DoubleNode<T>* p = stack.head->prev;
+   while(p!= stack.head&&p!=nullptr){
+        os << p->data << " ";
+        p = p->prev;
     }
-    
     os << '\n';
     return os;
 }

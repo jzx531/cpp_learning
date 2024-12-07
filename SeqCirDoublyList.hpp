@@ -73,6 +73,15 @@ void SeqCirDoublyList<T>::set(int i, T x) {
 template<typename T>
 DoubleNode<T> * SeqCirDoublyList<T>::insert(T x) {
     DoubleNode<T> *p = new DoubleNode<T>(x);
+    if (this->head->next == this->head))
+    {
+        this->head->next = p;
+        this->head->prev = p;
+        p->next = this->head;
+        p->prev = this->head;
+        return p;
+    }
+    
     DoubleNode<T> *current = this->head->next;
     while( current->data < x) {
         current = current->next;
