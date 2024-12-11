@@ -93,9 +93,55 @@
 //     return 0;
 // }
 
-#include "CirDoublyList.hpp"
+// #include <iostream>
+// // #include "SeqCirDoublyList.hpp"
+// #include "Huffmantree.hpp"
+
+// template<typename T>
+// class Node{
+//     T data;
+// };
+
+// template<typename T>
+// class Seq{
+//     T data;
+// };
+
+// int main() {
+//     TriNode<int> node1(1);
+//     TriNode<int> node2(2);
+//     TriNode<int> node3(3);
+//     std::cout<<(node1<node2);
+
+//     node1.left = &node2;
+//     node1.right = &node3;
+
+//     TriNode<int> *nodeptr=nullptr;
+//     nodeptr = new TriNode<int>(node1);
+//     TriNode<int>* p = new TriNode<int>(node1);
+//     std::cout<<nodeptr->data<<std::endl;
+//     std::cout<<nodeptr->left->data<<std::endl;
+//     std::cout<<nodeptr->right->data<<std::endl;
+
+//     int a[] = {4,3,2,1};
+//     Huffmantree <int> ht(a, 4);
+//     ht.levelOrder();
+//     std::string code [4];
+//     printHuffmanCode(a, 4, code);
+
+//     std::string decoder = "011101100";
+//     std::string decoded = ht.decode(decoder, 9);
+//     std::cout << "decoded: " << decoded << '\n';
+
+//     return 0;
+// }
+
 #include <iostream>
+#include "LZWcode.hpp"
 
-int main() {                                      
-
+int main() {
+    LZWcode lzw;
+    std::cout<<lzw.encode("abbababac\0")<<std::endl;
+    std::cout<<lzw.decode("97 98 98 256 259 99\0");
+    return 0;
 }

@@ -15,6 +15,8 @@ public:
     // virtual DoubleNode<T> * insert(int i,T x);
     virtual void operator+=(CirDoublyList<T> & list);
     virtual void operator+=(SeqCirDoublyList<T> & list);
+    virtual T pop();
+    virtual T pop_head();
 };
 
 template<typename T>
@@ -73,7 +75,7 @@ void SeqCirDoublyList<T>::set(int i, T x) {
 template<typename T>
 DoubleNode<T> * SeqCirDoublyList<T>::insert(T x) {
     DoubleNode<T> *p = new DoubleNode<T>(x);
-    if (this->head->next == this->head))
+    if (this->head->next == this->head)
     {
         this->head->next = p;
         this->head->prev = p;
@@ -115,6 +117,31 @@ void SeqCirDoublyList<T>::operator+=(SeqCirDoublyList<T> & list) {
     }
 }
 
+template<typename T>
+T SeqCirDoublyList<T>::pop() {
+    if(this->head->next == this->head) {
+        throw "List is empty";
+    }
+    DoubleNode<T> *p = this->head->prev;
+    T x = p->data;
+    this->head->prev = p->prev;
+    p->prev->next = this->head;
+    delete p;
+    return x;
+}
+
+template<typename T>
+T SeqCirDoublyList<T>::pop_head() {
+    if(this->head->next == this->head) {
+       std::cout<<" List is empty";
+    }
+    DoubleNode<T> *p = this->head->next;
+    T x = p->data;
+    this->head->next = p->next;
+    p->next->prev = this->head;
+    delete p;
+    return x;
+}
 
 
 

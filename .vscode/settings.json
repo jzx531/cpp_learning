@@ -55,6 +55,18 @@
         "ranges": "cpp",
         "span": "cpp",
         "stack": "cpp",
-        "vector": "cpp"
+        "vector": "cpp",
+        "ratio": "cpp",
+        "stop_token": "cpp",
+        "thread": "cpp",
+        "climits": "cpp",
+        "cfloat": "cpp",
+        "functional": "cpp",
+        "list": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "xhash": "cpp",
+        "sstream": "cpp",
+        "fstream": "cpp"
     }
 }
