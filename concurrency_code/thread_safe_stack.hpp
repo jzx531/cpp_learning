@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include "mingw.shared_mutex.h"
+#include "mingw.mutex.h"
 #include "mingw.thread.h"
 #include <stack>
 #include <atomic>

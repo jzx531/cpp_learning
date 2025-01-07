@@ -1,45 +1,42 @@
-#include <iostream>
-#include "mingw.shared_mutex.h"
-#include "mingw.thread.h"
+#include <algorithm>
 #include <vector>
-#include <atomic>
+#include <numeric>
+#include <iostream>
+#include "mingw.thread.h"
+#include "mingw.mutex.h"
 
-#define DATA_SIZE 10
-std::shared_mutex smtx;
 std::mutex mtx;
-std::atomic<bool> ready(false);
-std::vector<int> data;
-void init_data() {
-    for (int i = 0; i < DATA_SIZE; i++) {
-        data.push_back(i);
-    }
-    ready .store(true, std::memory_order_release);
+void print_num(int num)
+{
+	std::lock_guard<std::mutex> lock(mtx);
+	std::cout << num << " ";
 }
 
+class myclass
+{
+	public:
+	 int x;
+	 myclass(int i) : x(i) {}
+	 void print() const{
+		std::cout << x << " ";
+	 }
+	 void change(int i) {
+		this->x = i;
+		}
+};
 
 
-void thread_func(int id) {
-    // std::lock_guard<std::mutex> lock(mtx);
-    while(! ready.load(std::memory_order_acquire))
-    while(true) {
-        std::shared_lock<std::shared_mutex> lock(smtx);
-        // for (int i = 0; i < DATA_SIZE; i++) {
-            int i = rand() % DATA_SIZE;
-            std::cout << id << "THREAD "<< data[i] << std::endl;
-            std::this_thread::yield();
-        // }
-    }
-}
-
-int main() {
-    std::thread t(init_data);
-    std::thread t1(thread_func,1);
-    std::thread t2(thread_func,2);
-    
-    t.join();
-    t1.join();
-    t2.join();
-    
-   
-    return 0;
+int main()
+{
+	std::vector<int> nums{ 1, 2, 3, 4, 5 };
+	std::rotate(nums.begin(), nums.begin() + 2, nums.end());
+	std::for_each(nums.begin(), nums.end(), print_num);
+	std::for_each(nums.begin(), nums.end(), [](int &i) { i *= 2; });
+	// std::transform(nums.begin(), nums.end(), nums.begin(), [](int i) { return i * 2; });
+	std::for_each(nums.begin(), nums.end(), print_num);
+	// std::transform(nums.begin(), nums.end(), nums.begin(), [](int i) { return i + 1; });
+	std::cout << std::endl;
+	const myclass m1(10);
+	m1.print();
+	return 0;
 }

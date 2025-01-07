@@ -1,5 +1,5 @@
 # c++ concurrency in action
-
+[TOC]
 ## 线程管控
 每个c++程序都含有至少一个线程,即运行main()的线程,这些新线程连同其实线程并发运行,当main()函数返回时,程序就会退出
 ```c++
@@ -1021,6 +1021,75 @@ bool wait_loop()
 使用<mark>std::timed_mutex</mark>和<mark>std::recursive_timed_mutex</mark>可以设定超时时限,这两种锁都含有成员函数try_lock_for()和try_lock_until()
 
 ![alt text](timeout_in_cpp.png)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C++ Standard Library Functions</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+
+<h1>C++ Standard Library Functions with Timeout</h1>
+<table>
+    <thead>
+        <tr>
+            <th>类/命名空间</th>
+            <th>C++标准库中接收超时的函数</th>
+            <th>返回值</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>std::this_thread</td>
+            <td>sleep_for(duration)<br>sleep_until(time_point)</td>
+            <td>无</td>
+        </tr>
+        <tr>
+            <td>std::condition_variable或std::condition_variable_any</td>
+            <td>wait_for(lock, duration)<br>wait_until(lock, time_point, predicate)</td>
+            <td>Bool - 被唤醒时的返回值</td>
+        </tr>
+        <tr>
+            <td>std::timed_mutex<br>std::recursive_timed_mutex<br>std::shared_timed_mutex</td>
+            <td>try_lock_for(duration)<br>try_lock_until(time_point)</td>
+            <td>Bool - 若获得锁，则返回true，否则返回false</td>
+        </tr>
+        <tr>
+            <td>std::unique_lock<Timed Lockable></td>
+            <td>try_lock_for(duration)<br>try_lock_until(time_point)</td>
+            <td>无 - 如果在新构建的对象上获得锁，则返回true，否则返回false</td>
+        </tr>
+        <tr>
+            <td>std::shared_lock<Shared TimedLockable></td>
+            <td>try_lock_for(duration)<br>try_lock_until(time_point)</td>
+            <td>Bool - 若获得锁，则返回true，否则返回false</td>
+        </tr>
+        <tr>
+            <td>std::future<ValueType>或std::shared_future<ValueType></td>
+            <td>wait_for(duration)<br>wait_until(time_point)</td>
+            <td>如果等待超时返回std::future_status::timeout<br>如果准备则返回std::future_status::ready<br>如果被延迟则返回std::future_status::deferred</td>
+        </tr>
+    </tbody>
+</table>
+
+</body>
+</html>
+
 
 快速排序的串行实现
 
@@ -2171,6 +2240,2985 @@ lock()实现方式是在循环中反复调用flag.text_and_set()，其中所采�
 
 ## 设计基于锁的并发数据结构
 
+```c++
+#ifndef THREADSAFE_QUEUE_HPP
+#define THREADSAFE_QUEUE_HPP
+
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.thread.h"
+#include "mingw.condition_variable.h"
+#include "mingw.mutex.h"
+#include <atomic>
+#include <queue>
+
+template<typename T>
+class threadsafe_queue {
+    public:
+        mutable std::mutex mut;
+        std::queue<T> data_queue;
+        std::condition_variable data_cond;
+    public:
+        threadsafe_queue(){};
+        void push(T new_value)
+        {
+            std::lock_guard<std::mutex> lk(mut);
+            data_queue.push(std::move(new value));
+            data_cond.notify_one();
+        }
+        void wait_and_pop(T& value)
+        {
+            std::unique_lock<std::mutex> lk(mut);
+            data_cond.wait(lk,[this]{return !data_queue.empty()});
+            value = std::move(data_queue.front());
+            data_queue.pop();
+        }
+        std::shared_ptr<T> wait_and_pop()
+        {
+            std::unique_lock<std::mutex> lk(mut);
+            data_cond.wait(lk,[this]{return !data_queue.empty();});
+            std::shared_ptr<T> res(std::make_shared<T>(std::move(data_queue.front())));
+            data_queue.pop();
+            return res;
+        }
+        bool try_pop(T& value)
+        {
+            std::lock_guard<std::mutex> lk(mut);
+            if(data_queue.empty()) return false;
+            value = std::move(data_queue.front());
+            data_queue.pop();
+            return true;
+        }
+        std::shared_ptr<T> try_pop()
+        {
+            std::lock_guard<std::mutex> lk(mut);
+            if(data_queue.empty()) return std::shared_ptr<T>();
+            std::shared_ptr<T> res(std::make_shared<T>(std::move(data_queue.front())));
+            data_queue.pop();
+            return res;
+        }
+        bool empty() const
+        {
+            std::lock_guard<std::mutex> lk(mut);
+            return data_queue.empty();
+        }
+};
 
 
+#endif // THREADSAFE_QUEUE_HPP
+
+```
+本例与栈容器有所不同:假定在数据入队的过程中,有多个线程同时在等待,那么data_cond.notify_one()的调用只会唤醒一个,然而若该觉醒的线程在wait_and_pop()时抛出异常,就不会有任何其他线程被唤醒,如果希望所有等待线程都被唤醒,使用data_cond.notify_all()即可，但会大大增加开销
+改善方法是为了不抛出异常,队列容器改为存储std::shared_ptr<>
+```c++
+#ifndef THREADSAFE_QUEUE_HPP
+#define THREADSAFE_QUEUE_HPP
+
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.thread.h"
+#include "mingw.condition_variable.h"
+#include "mingw.mutex.h"
+#include <atomic>
+#include <queue>
+
+template<typename T>
+class threadsafe_queue 
+{
+    private:
+        mutable std::mutex mut;
+        std::queue<std::shared_ptr<T>> data_queue;
+        std::condition_variable data_cond;
+    public:
+        threadsafe_queue(){};
+        void wait_and_pop(T& value)
+        {
+            std::unique_lock<std::mutex> lk(mut);
+            data_cond.wait(lk,[this]{return !data_queue.empty();});
+            value = std::move(*data_queue.front());
+            data_queue.pop();
+        }
+        bool try_pop(T& value)
+        {
+            std::lock_guard<std::mutex> lk(mut);
+            if(data_queue.empty()) return false;
+            value = std::move(*data_queue.front());
+            data_queue.pop();
+            return true;
+        }
+        std::shared_ptr<T> wait_and_pop()
+        {
+            std::unique_lock<std::mutex> lk(mut);
+            if(data_queue.empty()) return std::shared_ptr<T>();
+            std::shared_ptr<T> res = data_queue.front();
+            data_queue.pop();
+            return res;
+        }
+        void push(T new_value)
+        {
+            std::shared_ptr<T> data(std::make_shared<T>(std::move(new_value)));
+            std::lock_guard<std::mutex> lk(mut);
+            data_queue.push(data);
+            data_cond.notify_one();
+        }
+        bool empty() const
+        {
+            std::lock_guard<std::mutex> lk(mut);        
+            return data_queue.empty();
+        }
+        
+};
+
+#endif // THREADSAFE_QUEUE_HPP
+```
+
+```c++
+#ifndef THREAD_SAFE_STACK_HPP
+#define THREAD_SAFE_STACK_HPP
+
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.mutex.h"
+#include "mingw.thread.h"
+#include <stack>
+#include <atomic>
+#include <exception>
+
+struct empty_stack:std::exception{
+    const char* what() const throw();
+};
+
+template<typename T>
+class threadsafe_stack
+{
+    private:
+        std::stack<T> stack;
+        mutable std::mutex m;
+    public:
+        threadsafe_stack(){}
+        threadsafe_stack(const threadsafe_stack& other)
+        {
+            std::lock_guard<std::mutex> lock(other.m);
+            data = other.data;
+        }
+        threadsafe_stack& operator=(const threadsafe_stack& )=delete;
+        void push(T new_value)
+        {
+            std::lock_guard<std::mutex> lock(m);
+            stack.push(new_value);
+        }
+
+        std::shared_ptr<T> pop()
+        {
+            std::lock_guard<std::mutex> lock(m);
+            if(data.empty()) throw empty_stack();
+            std::shared_ptr<T> const res(std::make_shared<T>(std::move(data.top())));
+            data.pop();
+            return res;
+        }
+
+        void pop(T& value)
+        {
+            std::lock_guard<std::mutex> lock(m);
+            if(data.empty())throw empty_stack();
+            value = std::move(data.top());
+            data.pop();
+        }
+
+        bool empty()const{
+            std::lock_guard<std::mutex> lock(m);
+            return data.empty();
+        }
+};
+
+#endif // THREAD_SAFE_STACK_HPP
+```
+
+#### 采用细粒度的锁和条件变量实现线程安全的队列容器
+单线程队列的简单实现
+```c++
+template <typename T>
+class queue
+{
+    private:
+        struct node
+        {
+            T data;
+            std::unique_ptr<node>next;
+            node(T data_):data(std::move(data_)){}
+        };
+        std::unique_ptr<node> head;
+        node* tail;
+    public:
+        queue():tail(nullptr){}
+        queue(const queue& other)=delete;
+        queue& operator=(const queue&)=delete;
+        std::shared_ptr<T> try_pop()
+        {
+            if(!head)
+            {
+                return std::shared_ptr<T>();
+            }
+            std::shared_ptr<T> const res(std::make_shared<T>(std::move(head->data)));
+            head = std::move(head->next);
+            if(!head)
+            {
+                tail = nullptr;
+            }
+            return res;
+        
+        }
+        void push(T new_value)
+        {
+            std::unique_ptr<node> p(new node(std::move(new_value)));
+            node* const new_tail = p.get();
+            if(tail)
+            {
+                tail->next = std::move(p);
+            }
+            else
+            {
+                head=std::move(p);
+            }
+            tail = new_tail;
+        }
+}
+```
+
+1. 通过分离数据而实现并发
+   我们可以预先设置一个不含数据的虚位节点
+   从而保证至少存在一个节点,以区别头尾两个节点的访问,如果队列为空,head和tail两个指针都不再是NULL值,而是同时指向虚位节点
+   若我们向队列添加数据,则head和tail指针会分别指向不同的节点,在head->next和tail->next上不会出现竞争,但其缺点是,为了容纳虚位节点,我们需要通过指针间接存储数据,额外增加了一个访问层级
+
+   带有虚位节点的简单队列
+   ```c++
+   template <typename T>
+   class queue
+   {
+    private:
+        struct node
+        {
+            std::shared_ptr<T> data;
+            std::unique_ptr<node>next;
+        };
+        std::unique_ptr<node> head;
+        node* tail;
+    public:
+        queue():head(new node),tail(head.get()){};
+        queue&(const queue& other)=delete;
+        queue& operator=(const queue&)=delete;
+        std::shared_ptr<T> try_pop()
+        {
+            if(head.get()==tail)
+            {
+                return std::shared_ptr<T>();
+            }
+            std::shared_ptr<T> const res(head->data);
+            std::unique_ptr<node> old_head = std::move(head);
+            head = std::move(old_head->next);
+            return res;
+        }
+        void push(T new_value)
+        {
+            std::shared_ptr<T> data(std::make_shared<T>(std::move(new_value)));
+            std::unique_ptr<node> p(new node);
+            tail->data = data;
+            node* const new_tail = p.get();
+            tail->next = std::move(p);
+            tail = new_tail;
+        }
+   }
+    ```
+引入虚位节点,head指针不再取值NULL,改为比较head和tail是否重叠
+
+push只访问tail指针而不再触及head指针，虽然try_pop()既访问head指针又访问tail指针,但tail指针只用于函数中最开始的比较运算，所以只需短暂持锁
+
+push在新节点创建完成就锁住,在数据赋予当前尾节点之前也要锁住互斥
+try_pop首先需要为head锁住互斥并一直持锁,等待使用完再解锁，余下只有tail
+需要在对应的互斥上加锁,最好在临近访问再加锁,所以可以将加锁和访问封装成一个函数
+
+```c++
+#ifndef THREAD_SAFE_QUEUE_FINEGRAIN_HPP
+#define THREAD_SAFE_QUEUE_FINEGRAIN_HPP
+
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.thread.h"
+#include "mingw.condition_variable.h"
+#include "mingw.mutex.h"
+#include <atomic>
+#include <queue>
+
+template<typename T>
+class threadsafe_queue
+{
+    private:
+        struct node
+        {
+            std::shared_ptr<T> data;
+            std::unique_ptr<node> next;
+        };
+        std::mutex head_mutex;
+        std::unique_ptr<node> head;
+        std::mutex tail_mutex;
+        node* tail;
+        node* get_tail()
+        {
+            std::lock_guard<std::mutex> tail_lock(tail_mutex);
+            return tail;
+        }
+        std::unique_ptr<node>pop_head()
+        {
+            std::lock_guard<std::mutex> head_lock(head_mutex);
+            if (head.get() == get_tail())
+            {
+                return nullptr;
+            }
+            std::unique_ptr<node> old_head = std::move(head);
+            head = std::move(old_head->next);
+            return old_head;
+        }
+
+        public:
+        threadsafe_queue():head(new node),tail(head.get()){};
+        threadsafe_queue(const threadsafe_queue& other) = delete;
+        threadsafe_queue& operator=(const threadsafe_queue& other) = delete;
+        std::shared_ptr<T> try_pop()
+        {
+            std::unique_ptr,node> old_head = pop_head();
+           return old_head ? old_head->data : std::shared_ptr<T>();
+        }
+
+        void push(T new_value)
+        {
+            std::unique_ptr<node> new_node(std::make_shared<T>(std::move(new_value)));
+            std::unique_ptr<node> p(new node);
+            node* const new_tail = p.get();
+            std::lock_guard<std::mutex> tail_lock(tail_mutex);
+            tail->data = new_data;
+            tail->next = std::move(p);
+            tail = new_tail;
+        }
+
+};
+
+#endif
+```
+```c++
+#ifndef THREADSAFE_QUEUE_WAIT_HPP
+#define THREADSAFE_QUEUE_WAIT_HPP
+#include<iostream>
+#include "mingw.thread.h"
+#include "mingw.mutex.h"
+#include "mingw.condition_variable.h"
+
+template<typename T>
+class threadsafe_queue
+{
+    private:
+        struct node
+        {
+            std::shared_ptr<T> data;
+            std::unique_ptr<node> next;
+        };
+        std::mutex head_mutex;
+        std::unique_ptr<node> head;
+        std::mutex tail_mutex;
+        node* tail;
+        std::condition_variable data_cond;
+    public:
+        threadsafe_queue():head(new node),tail(head.get()){}
+        threadsafe_queue(const threadsafe_queue&) = delete;
+        threadsafe_queue& operator=(const threadsafe_queue&) = delete;
+        std::shared_ptr<T> try_pop();
+        bool try_pop(T& value);
+        void wait_and_pop(T& value);
+        std::shared_ptr<T> wait_and_pop();
+        void push(T new_value);
+        bool empty();
+    private:
+        node* get_tail()
+        {
+            std::lock_guard<std::mutex> tail_lock(tail_mutex);
+            return tail;
+        }
+        std::unique_ptr<node> pop_head()
+        {
+            std::unique_lock<node> old_head=std::move(head);
+            head = std::move(old_head->next);
+            return old_head;
+        }
+        std::unique_lock<std::mutex> wait_for_data()
+        {
+            std::unique_lock<std::mutex> head_lock(head_mutex);
+            data_cond.wait(head_lock,[&]{return head.get()!= get_tail();});
+            return std::move(head_lock);
+        }
+        std::unique_lock<node> wait_pop_head()
+        {
+            std::unique_lock<std::mutex> head_lock(wait_for_data());
+            return pop_head();
+        }
+        std::unique_lock<node> wait_pop_head(T &value)
+        {
+            std::unique_lock<std::mutex> head_lock(wait_for_data());
+            value = std::move(*head->data);
+            return pop_head();
+        }
+        std::unique_ptr<node> try_pop_head()
+        {
+            std::lock_guard<std::mutex> head_lock(head_mutex);
+            if (head.get() == get_tail())
+            {
+                return std::unique_ptr<node>();
+            }
+            return pop_head();
+        }
+        std::unique_ptr<node> try_pop_head(T &value)
+        {
+            std::lock_guard<std::mutex> head_lock(head_mutex);
+            if (head.get() == get_tail())
+            {
+                return std::unique_ptr<node>();
+            }
+            value = std::move(*head->data);
+            return pop_head();
+        }
+};
+
+template<typename T>
+void threadsafe_queue<T>::push(T new_value)
+{
+    std::shared_ptr<T> new_data(std::make_shared<T>(std::move(new_value)));
+    std::unique_ptr<node> p(new node);
+    {
+        std::lock_guard<std::mutex> tail_lock(tail_mutex);
+        tail->data = new_data;
+        tail->next = std::move(p);
+        node* const new_tail = p.get();
+        tail = new_tail;
+    }
+    data_cond.notify_one();
+}
+
+template<typename T>
+std::shared_ptr<T> threadsafe_queue<T>::wait_and_pop()
+{
+    std::unique_ptr<node> const old_head = wait_pop_head();
+    return old_head->data;
+}
+
+template<typename T>
+void threadsafe_queue<T>::wait_and_pop(T& value)
+{
+    std::unique_lock<node> old_head = wait_pop_head(value);
+}
+template<typename T>
+std::shared_ptr<T> threadsafe_queue<T>::try_pop()
+{
+    std::unique_ptr<node> const old_head = try_pop_head();
+    return old_head? old_head->data : std::shared_ptr<T>();
+}
+
+template<typename T>
+bool threadsafe_queue<T>::try_pop(T& value)
+{
+    std::unique_ptr<node> const old_head = try_pop_head(value);
+    return old_head;
+}
+
+template<typename T>
+bool threadsafe_queue<T>::empty()
+{
+    std::lock_guard<std::mutex> head_lock(head_mutex);
+    return head.get() == get_tail();
+}
+
+
+
+#endif // THREADSAFE_QUEUE_WAIT_HPP
+```
+
+### 设计更复杂的基于锁的并发数据结构
+
+```c++
+#ifndef THREADSAFE_LIST_HPP
+#define THREADSAFE_LIST_HPP
+
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.thread.h"
+#include "mingw.condition_variable.h"
+#include "mingw.mutex.h"
+#include <hash_map>
+#include <list>
+#include <utility>
+
+template<typename T>
+class threadsafe_list
+{
+    struct node
+    {
+        std::mutex m;
+        std::shared_ptr<T> data;
+        std::unique_ptr<node> next;
+        node():next(){}
+        node(T const& value):data(std::make_shared<T>(value)){}
+    };
+    node head;
+    public: 
+        threadsafe_list(){}
+        ~threadsafe_list(){
+            remove_if([](node const&){return true;});
+        }
+        threadsafe_list(threadsafe_list const& other)=delele;
+        threadsafe_list& operator=(threadsafe_list const& other)=delete;
+        template<typename Function>
+        void for_each(Function f)
+        {
+            node* current=&head;
+            std::unique_lock<std::mutex> lk(head.m);
+            while(node* const next=current->next.get())
+            {
+                std::unique_lock<std::mutex> next_lk(next->m);
+                lk.unlock();
+                f(*next->data);
+                current=next;
+                lk = std::move(next_lk);
+            }
+        }
+
+        template<typename Predicate>
+        std::shared_ptr<T> find_first_if(Predicate p)
+        {
+            node* current =&head;
+            std::unique_lock<std::mutex> lk(head.m);
+            while(node* const next=current->next.get())
+            {
+                std::unique_lock<std::mutex> next_lk(next->m);
+                lk.unlock();
+                if(p(*next->data))
+                {
+                    return next->data;
+                }
+                current=next;
+                lk = std::move(next_lk);
+            }
+            return std::shared_ptr<T>();
+        }
+
+        template<typename Predicate>
+        bool remove_if(Predicate p)
+        {
+            node* current=&head;
+            std::unique_lock<std::mutex> lk(head.m);
+            while(node* const next= current->next.get())
+            {
+                std::unique_lock<std::mutex> next_lk(next->m);
+                if(p(*next->data))
+                {
+                    std::unique_lock<std::mutex> next_lk(next->m);
+                    if(p(*next->data))
+                    {
+                        std::unique_ptr<node> old_next = std::move(current->next);
+                        current->next = std::move(next->next);
+                        next_lk.unlock();
+                    }
+                    else 
+                    {
+                        lk.unlock();
+                        current = next;
+                        lk = std::move(next_lk);
+                    }
+                }
+            }
+        }
+};
+
+#endif // THREADSAFE_LIST_HPP
+```
+
+## 设计无锁数据结构
+
+算法和数据结构中只要采用了互斥,条件变量或future进行同步操作,就称之为阻塞型算法和阻塞型数据结构,如果应用程序调用某些库函数,发起调用的线程便会暂停运行,即在函数的调用点阻塞,等到另一线程完成某项相关操作,阻塞才会解除,前者才会继续运行。
+这些库函数的调用被命名为阻塞型调用,操作系统往往会把被阻塞的线程彻底暂停,并将其时间片分给其他线程,等到有线程执行了恰当的操作,阻塞方被解除,恰当的操作可能是释放互斥,知会条件变量,或是未future对象装填结果值而令其就绪
+
+没有采用上述阻塞型库函数的调用的称为非阻塞型算法和非阻塞型数据结构
+
+```c++
+class spinlock_mutex
+{
+    std::atomic_flag flag;
+    public:
+    spinlock_mutex():flag(ATOMIC_FLAG_INIT){}
+    void lock()
+    {
+        while(flag.test_and_set(std::memory_order_acquire));
+    }
+
+    void unlock()
+    {
+        flag.clear(std::memory_order_release);
+    }
+};
+```
+实践中,我们需要参考下列详细定义,根据适用的条款,分辨该型别/函数属于哪一类
+
+1. 无阻碍:假定其他线程全部暂停,则目标线程将在有限步骤内完成自己的操作
+2. 无锁:如果多个线程共同操作同一份数据,那么在有限步骤内,其中某一线程能够完成自己的操作
+3. 免等:在某份数据上,每个线程经过有限步骤就能完成自己的操作,即便该份数据同时被其他多个线程操作
+
+### 无需等待的数据结构
+如果它被多个线程访问,不论其他线程上发生什么,每个线程都能在有限步骤内完成自己的操作,
+若多个线程之间存在冲突,导致某算法无限制的反复尝试执行操作,那它就是免等算法
+
+```c++
+#ifndef LOCK_FREE_STACK_HPP
+#define LOCK_FREE_STACK_HPP
+
+#include <atomic>
+#include <memory>
+
+template<typename T>
+class lock_free_stack
+{
+    private:
+        struct node
+        {
+            T data;
+            node* next;
+            node(const T& data_):data(data_){};
+        };
+        std::atomic<node*> head;
+    public:
+        void push(T const& data)
+        {
+            node* const new_node = new node(data);
+            new_node->next = head.load();
+            while(!head.compare_exchange_weak(new_node->next, new_node));
+        //首先不等,new_node->next = head;然后相等head=new_node，退出循环
+        }
+        void pop(T& result)
+        {
+            node* old_head=head.load();
+            while(!head.compare_exchange_weak(old_head,old_head->next));
+            result=old_head->data;
+        }//一旦比较交换操作成功,说明只有当前线程在改动栈容器,从栈顶弹出节点
+        //该段代码未处理空栈情况,以及安全异常处理
+};
+
+template<typename T>
+class lock_free_stack_sptr
+{
+    private:
+    struct node{
+        std::shared_ptr<T> data;
+        node* next;
+        node(T const& data_):data(std::make_shared<T>(data)){}
+    };
+    std::atomic<node*> head;
+    public:
+        void push(T const& data)
+        {
+            node* const new_node = new node(data);
+            new_node->next = head.load();
+            while(!head.compare_exchange_weak(new_node->next, new_node));
+        }
+        std::shared_ptr<T> pop()
+        {
+            node* old_head=head.load();
+            while(old_head && !head.compare_exchange_weak(old_head,old_head->next));
+            return old_head? old_head->data : std::shared_ptr<T>();
+        }
+        //这段代码虽然是无锁实现,却非免等实现,原因在于若compare_exchange_weak()的结果总是false,理论上会导致push()和pop()中的while循环持续进行
+    //只有等到没有线程调用pop()时才删除链表中的节点
+    private:
+        std::atomic<node*> to_be_deleted;
+        static void delete_nodes(node* nodes)
+        {
+            while(nodes)
+            {
+                node* next = nodes->next;
+                delete nodes;
+                nodes = next;
+            }
+        }
+        void try_reclaim(node* old_head)
+        {
+            if(threads_in_pop==1)
+            {
+                node* nodes_to_delete = to_be_deleted.exchange(nullptr);//当前线程把候删链表收归己有
+                if(!--threads_in_pop)//判断pop()是否仅仅正被当前线程唯一调用
+                {
+                    delete_nodes(nodes_to_delete);
+                }
+                else if(nodes_to_delete)
+                {
+                    chain_pending_nodes(nodes_to_delete);
+                }
+                delete old_head;
+            }
+            else{
+                chain_pending_node(old_head);
+                --threads_in_pop;
+            }
+        }
+
+        void chain_pending_nodes(node* nodes)
+        {
+            node* last=nodes;
+            while(node* const next=last->next)
+            {
+                last=next;
+            }
+            chain_pending_nodes(nodes,last);
+        }
+
+        void chain_pending_nodes(node* first, node* last)
+        {
+            last->next = to_be_deleted;
+            while(!to_be_deleted.compare_exchane_weak(last->next,first));//借循环保证last->next指向正确
+        }
+
+        void chain_pending_node(node* n)
+        {
+            chain_pending_nodes(n,n);
+        }
+    
+    private:    
+        std::atomic<unsigned> threads_in_pop;
+        void try_reclaim(node* old_head);
+    public:
+        std::shared_ptr<T> pop_safe()
+        {
+            ++threads_in_pop;
+            node* old_head = head.load();
+            while(old_head&&!head.compare_exchange_weak(old_head,old_head->next));
+            //此处head已经指向下一个节点,所以不会有线程再访问old_head
+            std::shared_ptr<T> res;
+            if(old_head)
+            {
+                res.swap(old_head->data);
+            }
+            try_reclaim(old_head);
+            return res;
+        }
+        //原子变量threads_in_pop记录目前正有多少线程试图从栈容器弹出数据
+        //它在pop()函数的最开始处自增,在try_reclaim()内部自减,每当有节点被删除,程序就调用try_reclaim()一次
+        //由于可能延后删除节点,所以暂时只用swap将数据置换出来,而先不删除地址
+};
+
+#endif // LOCK_FREE_STACK_HPP
+```
+采用风险指针实现的pop()函数
+
+```c++
+std::shared_ptr<T> pop()
+{
+    std::atomic<void*> &hp=get_hazard_pointer_for_current_thread();
+    node* old_head=head.load();
+    do{
+        node* temp=old_head;
+        do{//反复循环直到风险指针被设置为head才停止
+            temp=old_head;
+            hp.store(old_head);
+            old_head=head.load();
+        }while(old_head1!=temp);
+    }while(!head.compare_exchange_weak(old_head,old_head->next));
+    hp.store(nullptr);
+    if(old_head)
+    {
+        res.swap(old_head->data);
+        if(outstanding_hazard_pointers_for(old_head))
+        {//删除旧有头结点之前,先检查它是否正在被风险指针所指涉
+        //若被指涉,该节点就不能马上删除,我们调用delete_nodes_with_no_hazards()，以检查reclaim_later()回收所有节点,如果其中有一些节点不再被任何指针所指涉,即可安全删除
+            reclaim_later(old_head);
+        }
+        else
+        {
+            delete old_head;
+        }
+        delete_nodes_with_no_hazards();
+    }
+    return res;
+}
+
+//get_hazard_pointer_for_current_thread()的简单实现
+unsigned const max_hazard_pointers=100;
+struct hazard_pointer
+{
+    std::atomic<std::thread::id>id;
+    std::atomic<void*> pointer;
+};
+hazard_pointer hazard_pointers[max_hazard_pointers];
+class hp_owner
+{
+    hazard_pointer * hp;
+    public:
+    hp_owner(hp_owner const&)=delete;
+    hp_owner& operator=(hp_owner const&)=delete;
+    hp_owner():hp(nullptr)
+    {
+        for(unsigned i=0;i<max_hazard_pointers;++i)
+        {
+            std::tread::id old_id;
+            if(hazard_pointers[i].id.compare_exchange_strong(old_id,std::this_thread::get_id()))
+            {
+                hp=&hazard_pointers[i];
+                break;
+            }
+        }
+        if(!hp)
+        {
+            throw std::runtime_error("No hazard pointers available");
+        }
+    }
+    std::atomic<void*>& get_pointer(){
+        return hp->pointer;
+    }
+    ~hp_owner()
+    {
+        hp->pointer.store(nullptr);
+        hp->id.store(std::thread::id());
+    }
+};
+
+std::atomic<void*>& get_hazard_pointer_for_current_thread()
+{
+    thread_local static hp_owner hazard;
+    return hazard.get_pointer();
+}
+
+bool outstanding_hazard_pointers_for(node* p)
+{
+    for(unsigned i=0;i<max_hazard_pointers;++i)
+    {
+        if(hazard_pointers[i].pointer.load()==p)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+//节点回收函数的一种简单实现
+template<typename T>
+void do_delete(void* p)
+{
+    delete static_cast<T*>(p);
+}
+
+struct data_to_reclaim
+{
+    void* data;
+    std::function<void(void*)> deleter;
+    data_to_reclaim* next;
+    template<typename T>
+    data_to_reclaim* next;
+    data_to_reclaim(T* p):data(p),deleter(&do_delete<T>),next(0){}
+    ~data_to_reclaim(){
+        deleter(data);
+    }
+};
+
+std::atomic<data_to_reclaim*> nodes_to_reclaim;
+void add_to_reclaim_list(data_to_reclaim* node)
+{
+    node->next = nodes_to_reclaim.load();
+    while(!nodes_to_reclaim.compare_exchange_weak(node->next,node));
+}
+
+template<typename T>
+void reclaim_later(T* data)
+{
+    add_to_reclaim_list(new data_to_reclaim(data));
+}
+
+void delete_nodes_with_no_hazards()
+{
+    data_to_reclaim * current = 
+    nodes_to_reclaim.exchange(nullptr);
+    while(current)
+    {
+        data_to_reclaim * const next = current->next;
+        if(!outstanding_hazard_pointers_for(current->data))
+        {
+            delete current;
+        }
+        else
+        {
+            add_to_reclaim_list(current);
+        }
+        current = next;
+    }
+}
+```
+```c++
+template<typename T>
+class lock_free_stack
+{
+    private:
+        struct node
+        {
+            std::shared_ptr<T> data;
+            std::shared_ptr<node> next;
+            node(T const& data_):
+            data(std::make_shared<T>(data_)){}
+        };
+    public:
+        void push(T const& data)
+        {
+            std::shared_ptr<node>
+            const new_node=std::make_shared<node>(data);
+            new_node->next=std::atomic_load(&head);
+            while(!std::atomic_compare_exchange_weak(&head,
+            &new_node->next,new_node));
+        }
+
+        std::shared_ptr<T> pop()
+        {
+            std::shared_ptr<node> old_head=std::atomic_load(&head);
+            while(old_head && !std::atomic_compare_exchange_weak(&head,
+            &old_head,old_head->next));
+            if(old_head)
+            {
+                std::atomic_store(&old_head->next,std::shared_ptr<node>());
+            }
+            return std::shared_ptr<T>();
+        }
+        ~lock_free_stack(){
+            while(pop());
+        }
+};
+```
+
+按分离引用计数的方式向无锁栈容器压入节点
+内外两个计数器之和即为节点的总引用数目
+外部计数器每当指针被读取时自增,内部计数器每当读取操作完成而自减
+```c++
+template<typename T>
+class lock_free_stack
+{
+    private:
+        struct node;
+        struct counted_node_ptr
+        {
+            int external_count;
+            node* ptr;
+        };
+        struct node
+        {
+            std::shared_ptr<T> data;
+            std::atomic<int> internal_count;
+            counted_node_ptr next;
+            node(T const& data_):
+            data(std::make_shared<T>(data_)),internal_count(0){}
+        };
+        std::atomic<counted_node_ptr> head;
+
+        void increase_head_count(counted_node_ptr& old_counter)
+        {
+            counted_node_ptr new_counter;
+            do{
+                new_counter = old_counter;
+                ++new_counter.external_count;
+            }while(!head.compare_exchange_strong(old_counter,new_counter));//对比两个机构体,二者ptr均指向头结点,但external_count不同,判定head指针是否同时被别的线程改动过,如果两个结构体相等,就把计数器自增后的新值赋予head
+            old_counter.external_count=new_counter.external_count;
+        }
+    public:
+        ~lock_free_stack()
+        {
+            while(pop());
+        }
+
+        void push(T const& data)
+        {
+            counted_node_ptr new_node;
+            new_node.ptr=new node(data);
+            new_node.external_count=1;
+            new_node.ptr->next=head.load();
+            while(!head.compare_exchange_weak(new_node.ptr->next,new_node));
+        }
+
+        std::shared_ptr<T> pop()
+        {
+            counted_node_ptr old_head=head.load();
+            for(;;){
+                increase_head_count(old_head);
+                node* const ptr=old_head.ptr;
+                if(!ptr)
+                {
+                    return std::shared_ptr<T>();
+                }
+                if(head.compare_exchange_strong(old_head,ptr->next))//若失败,则表明此时有另一线程同时弹出节点,且先于本线程完成,或有另一线程同时向栈容器压入新节点,也先于本线程完成,此时old_head指向的节点已经被其他线程删除,所以需要重新读取head指针
+                {
+                    std::shared_ptr<T> res;
+                    res.swap(ptr->data);//通过swap将数据从节点中提取出来,从而确保在弹出完成后数据项无法被其他线程指涉
+                    int const count_increase=old_head.external_count-2;
+                    //内部计数器的增量是外部计数器的旧值减2,头节点弹出栈容器，此时-1，而当前线程不再访问该节点,所以外部计数器再-1
+                    if(ptr->internal_count.fetch_add(count_increase)==-count_increase)//fetch_add将节点外部引用计数器的新值加到内部引用计数上,若内部引用计数值变为0,则其原值的返回值是新的外部引用计数值的相反数,遂可删除节点
+                    {
+                        delete ptr;
+                    }
+                    return res;
+                }
+                else if(ptr->internal_count.fetch_add(1)==1)//若当前线程弹出节点失败,则它不会再访问该节点,我们遂令其引用计数自减,如果当前线程试图弹出这个节点却操作失败,则它不会再访问该节点,我们就令其引用计数自减
+                //如果当前线程是最后一个持有指针的线程,则其内部引用计数会变为1,再减1会使计数清零所以删除节点再继续循环
+                {
+                    delete ptr;
+                }
+            }
+        }
+};
+
+```
+只要我们载入head指针,就必须首先令头节点的外部引用计数自增,以表明它正在被指涉//内部计数器的增量是外部计数器的旧值减2,头节点弹出栈容器，此时-1，而当前线程不再访问该节点,所以外部计数器再-1
+
+#### 实现线程安全的无锁队列
+
+仅能服务单一生产者和单一消费者的无锁队列
+
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        struct node
+        {
+            std::shared_ptr<T> data;
+            node* next;
+            node():next(nullptr){}
+        };
+
+        std::atomic<node*> head;
+        std::atomic<node*> tail;
+        node* pop_head()
+        {
+            node* const old_head=head.load();
+            if(old_head==tail.load())
+            {
+                return nullptr;
+            }
+            head.store(old_head->next);
+            return old_head;
+        }
+        public:
+        lock_free_queue():head(new node),tail(head.load()){}
+        lock_free_queue(const lock_free_queue& other)=delete;
+        lock_free_queue& operator=(const lock_free_queue& other)=delete;
+        ~lock_free_queue()
+        {
+            while(node* const old_head=head.load())
+            {
+                head.store(old_head->next);
+                delete old_head;
+            }
+        }
+        std::shared_ptr<T> pop()
+        {
+            node* old_head=pop_head();
+            if(!old_head)
+            {
+                return std::shared_ptr<T>();
+            }
+            std::shared_ptr<T>res(std::make_shared<T>(old_head->data));
+            delete old_head;
+            return res
+        }
+        void push(T new_value)
+        {
+            std::shared_ptr<T> new_data(std::make_shared<T>(new_value));
+            node* p=new node;
+            node* const old_tail=tail.load();
+            old_tail->data=new_data;
+            old_tail->next=p;
+            tail.store(p);
+        }
+};
+```
+
+上面的代码仅支持单生产者和单消费者模式,若要支持多生产者和多消费者模式则需进一步修改
+
+```c++
+void push(T new_value)
+{
+    std::unique_ptr<T> new_data(new T(new_value));
+    counted_node_ptr new_next;
+    new_next.ptr=new node;
+    new_next.external_count = 1;
+    for(;;)
+    {
+        node* const old_tail= tail.load();
+        T* old_data=nullptr;
+        if(old_tail->data.compare_exchange_strong(old_data,new_data.get()))//若尾节点没有数据,则将新数据放入尾节点
+        {
+            old_tail->next=new_next;
+            tail.store(new_next.ptr);
+            new_data.release();
+            break;
+        }
+    }
+}
+```
+实现无锁队列的push()功能,其中对尾节点进行引用计数
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        struct node;
+        struct counted_node_ptr
+        {
+            int external_count;
+            node* ptr;
+        };
+        std::atomic<counted_node_ptr>head;
+        std::atomic<counted_node_ptr>tail;
+        struct node_counter
+        {
+            unsigned internal_count:30;
+            unsigned external_counters:2;
+        };
+//         位域（bit field）:
+
+// 冒号（:）后面的数字表示该变量占用的位数。
+// internal_count:30 表示 internal_count 占用 30 位。
+// external_count:2 表示 external_count 占用 2 位。
+        struct node
+        {
+            std::atomic<T*> data;
+            std::atomic<node_counter> count;
+            counted_node_ptr next;
+            node()
+            {
+                node_counter new_count;
+                new_count.internal_count=0;
+                new_count.external_counters=2;
+                count.store(new_count);
+                next.ptr=nullptr;
+                next.external_count=0;
+            }
+        };
+        public:
+            void push(T new_value)
+            {
+                std::unique_ptr<T> new_data(new T(new_value));
+                counted_node_ptr new_next;
+                new_next.node_ptr new_next;
+                new_next.ptr = new node;
+                new_next.external_count=1;
+                for(;;)
+                {
+                    increase_external_count(tail);
+                    T* old_data=nullptr;
+                    if(old_tail.ptr->data.compare_exchange_strong(old_data,new_data.get()))
+                    {
+                        old_tail.ptr->next=new_next;
+                        old_tail=tail.exchange(new_next);
+                        free_external_counter(old_tail);
+                        new_data.release();
+                        break;
+                    
+                    }
+                    old_tail.ptr->release_ref();
+                }
+            }
+    
+};
+```
+从无锁队列弹出尾节点,该尾节点采取了引用计数
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        struct node{
+            void release_ref();
+        }
+    public:
+        std::unique_ptr<T> pop()
+        {
+            counted_node_ptr old_head=head.load(std::memory_order_relaxed);
+            for(;;)
+            {
+                increase_external_count(head,old_head);
+                node* const ptr=old_head.ptr;
+                if(ptr==tail.load().ptr)
+                {
+                    ptr->release_ref();
+                    return std::unique_ptr<T>();
+                }
+                if(head.compare_exchange_strong(old_head,ptr->next))
+                {
+                    T* const res=ptr->data.exchange(nullptr);
+                    free_external_counter(ptr);
+                    return std::unique_ptr<T>(res);
+                }
+                ptr->release_ref();
+            }
+        }
+};
+```
+在无锁队列中针对某节点的释放引用
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        struct node
+        {
+            void release_ref()
+            {
+                node_counter old_count=count.load(std::memory_order_relaxed);
+                node_counter new_count;
+                do{
+                    new counter=old_count;
+                    --new_counter.internal_count;
+                }while(!count.compare_exchange_strong(old_count,new_counter,std::memory_order_acquire,std::memory_order_relaxed));
+                if(!new_counter.internal_count&&!new_counter.external_counters)
+                {
+                    delete this;
+                }
+            }
+        };
+};
+```
+
+在无锁队列中针对某节点获取新引用
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        static void increase_external_count(std::atomic<counted_node_ptr>& counter,counted_node_ptr& old_counter)
+        {
+            counted_node_ptr new_counter;
+            do{
+                new_counter=old_counter;
+                ++new_counter.external_count;
+            }while(!counter.compare_exchange_strong(old_counter,new_counter,std::memory_order_acquire,std::memory_order_relaxed));
+            old_counter.external_count=new_counter.external_count;
+        
+        }
+};
+```
+针对无锁队列的节点释放其外部计数器
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        static void free_external_counter(counted_node_ptr& old_node_ptr)
+        {
+            node* const ptr=old_node_ptr.ptr;
+            int const count_increase=old_node_ptr.external_count-2;
+            node_counter new_counter;
+            do{
+                new_counter = old_counter;
+                --new_counter.external_counters;
+                new_counter.internal_count+=count_increase;
+            }while(!ptr->count.compare_exchange_strong(old_counter,new_counter,std::memory_order_relaxed);
+            if(!new_counter.internal_count&&!new_counter.external_counters)
+            {
+                delete ptr;
+            }
+        }
+};
+```
+经过修改的pop()可以协助队列的push()操作
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        struct node
+        {
+            std::atomic<T*> data;
+            std::atomic<node_counter> count;
+            std::atomic<counted_node_ptr> next;
+        };
+    public:
+        std::unique_ptr<T> pop()
+        {
+            counted_node_ptr old_head=head.load(std::memory_order_relaxed);
+            for(;;)
+            {
+                increase_external_count(head,old_head);
+                node* const ptr=old_head.ptr;
+                if(ptr==tail.load().ptr)
+                {
+                    return std::unique_ptr<T>();
+                }
+                counted_node_ptr next=ptr->next.load();
+                if(head.compare_exchange_strong(old_head,next))
+                {
+                    T* const res=ptr->data.exchange(nullptr);
+                    free_external_counter(old_head);
+                    return std::unique_ptr<T>(res);
+                }
+                ptr->release_ref();
+            }
+        }
+};
+```
+无锁队列中的push()范例,它能接受另一线程的协助
+```c++
+template<typename T>
+class lock_free_queue
+{
+    private:
+        void set_new_tail(counted_node_ptr&old_tail,counted_node_ptr &new_tail)
+        {
+            node* const current_tail_ptr=old_tail.ptr;
+            while(!tail.compare_exchange_weak(old_tail,new_tail)&&old_tail.ptr==current_tail_ptr);
+            if(old_tail.ptr!=current_tail_ptr)
+            {
+                free_external_counter(old_tail);
+            }
+            else
+            {
+                current_tail_ptr->release_ref();
+            }
+        }
+    public:
+        void push(T new_value)
+        {
+            std::unique_ptr<T> new_data(new T(new_value));
+            counted_node_ptr new_next;
+            new_next.ptr=new node;
+            new_next.external_count=1;
+            counted_node_ptr old_tail=tail.load();
+            for(;;)
+            {
+                increase_external_count(tail,old_tail);
+                T * old_data=nullptr;
+                if(old_tail.ptr->data.compare_exchange_strong(old_data,new_data.get()))
+                {
+                    counted_node_ptr old_next={0};
+                    if(!old_tail.ptr->next.compare_exchange_strong(old_next,new_next))
+                    {
+                        delete new_next.ptr;
+                        new_next=old_next;
+                    }
+                    set_new_tail(old_tail,new_next);
+                    new_data.release();
+                    break;
+                }
+                else
+                {
+                    counted_node_ptr old_next={0};
+                    if(!old_tail.ptr->next.compare_exchange_strong(old_next,new_next))
+                    {
+                        old_next=new_next;
+                        new_next.ptr=new node;
+                    }
+                    set_new_tail(old_tail,old_next);
+                }
+            }
+        }
+};
+```
+
+### 实现无锁数据结构的原则
+
+#### 原则1：在原型设计中使用std::memory_order_seq_cst次序
+若代码服从std::memory_order_seq_cst次序,会令全部操作形成一个确定的总序列。
+#### 原则2：使用无锁的内存回收方案
+1. 暂缓全部删除对象的动作,等到没有线程访问数据结构的时候,才删除待销毁的对象
+2. 采用风险指针,以辨识特定对象是否正在被某线程访问,就对象进行引用计数,只要外部环境正在指涉目标对象,它就不会被删除
+3. 就对象进行引用计数,只要外部环境仍在指涉目标对象,它就不会被删除
+
+#### 原则3: 防范ABA问题
+问题产生过程如下:
+1. 线程甲读取原子变量x,得知其值为A
+2. 线程甲根据A执行某项操作,比如查找,或如果x是指针，则依据它提取出相关值(称为ov)
+3. 线程甲因操作系统调度而发生阻塞
+4. 另一线程对原子变量x执行别的操作,将其值改成B
+5. 又有线程改变了与A相关的数据,是的线程甲原本持有的值失效,（这种情形肯呢个为A表示某内存地址，而改动操作则是释放指针的目标内存，或变更目标数据，最后将产生严重后果
+6. 原子变量x再次被某线程改动，重新变回A,若x属于指针型别,其指向目标可能在步骤5被改换成一个新对象
+7. 线程甲继续运行,在原子变量x上执行比较交换操作,与A进行对比，因此比较操作成功（因x的值依然为A），但步骤2中的ov已经失效,而线程甲却无从分辨,这将破坏数据结构
+
+#### 原则4：找出忙等循环,协助其他线程
+阻塞型操作与使用互斥和锁一样,三者均有可能以忙等循环的方式循环
+假设按照调度安排,某线程先开始执行,却因另一线程的操作而暂停等待,那么只要我们修改操作的算法,就能让前者先完成全部步骤,从而避免忙等：这要求将非原子变量的数据成员改为原子变量,并采用比较-交换操作设置其值
+
+---
+
+## 设计并发代码
+
+
+### 在线程间切分任务的方法
+1. 先在线程间切分数据,再开始处理
+
+2. 以递归方式划分数据
+```c++
+#ifndef Parallel_Quick_Sort_HPP
+#define Parallel_Quick_Sort_HPP
+
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.thread.h"
+#include "mingw.condition_variable.h"
+#include "mingw.mutex.h"
+#include "mingw.future.h"
+#include <list>
+#include "thread_safe_stack.hpp"
+#include <memory>
+#include <vector>
+#include <algorithm>
+
+
+template<typename T>
+struct sorter
+{
+    struct chunk_to_sort
+    {
+        std::list<T> data;
+        std::promise<std::list<T>> promise;
+    };
+    thread_safe_stack<chunk_to_sort> chunks;
+    std::vector<std::thread> threads;
+    unsigned const max_thread_count;
+    std::atomic<bool> end_of_data;
+    sorter():max_thread_count(std::thread::hardware_concurrency()-1),end_of_data(false){}
+    ~sorter(){
+        end_of_data = true;
+        for(unsigned i=0;i<threads.size();++i)
+        {
+            threads[i].join();
+        }
+    }
+    void try_sort_chunk()
+    {
+        std::shared_ptr<chunk_to_sort> chunk = chunks.pop();
+        if(chunk)
+        {
+            sort_chunk(chunk);
+        }
+    }
+
+    std::list<T> do_sort(std::list<T> &chunk_data)
+    {
+        if(chunk_data.empty())
+        {
+            return chunk_data;
+        }
+        std::list<T> result;
+        result.splice(result.begin(),chunk_data,chunk_data.begin());
+        T const& partition_val = *result.begin();
+        typename std::list<T>::iterator divide_point=std::partition(chunk_data.begin(),chunk_data.end(),[&](T const& val){return val<partition_val;});
+        chunk_to_sort new_lower_chunk;
+        new_lower_chunk.data.splice(new_lower_chunk.data.end(),chunk_data,chunk_data.begin(),divide_point);
+        std::future<std::list<T>> lower_future = new_lower_chunk.promise.get_future();
+        chunks.push(std::move(new_lower_chunk));
+        if(threads.size()<max_thread_count)
+        {
+            threads.push_back(std::thread(&sorter<T>::sort_thread,this));
+        }
+        std::list<T> new_higher(do_sort(chunk_data));
+        result.splice(result.end(),new_higher);
+        while(new_lower.wait_for(std::chrono::milliseconds(0))!=std::future_status::ready)
+        {
+            try_sort_chunk();
+        }
+        result.splice(result.begin(),new_lower.get());
+        return result;
+    }
+    void sort_chunk(std::shared_ptr<chunk_to_sort> const& chunk)
+    {
+        chunk->promise.set_value(do_sort(chunk->data));
+    }
+    void sort_thread()
+    {
+        while(!end_of_data)
+        {
+            try_sort_chunk();
+            std::this_thread::yield();
+        }
+    }
+};
+
+template<typename T>
+std::list<T> parallel_quick_sort(std::list<T> data)
+{
+    
+   if(data.empty())
+   {
+    return data;
+   }
+   sorter<T> sorter;
+   return sorter.do_sort(data);
+}
+
+
+#endif // Parallel_Quick_Sort_HPP
+```
+
+3. 依据工作类别划分任务
+
+### 影响并发代码性能的因素
+1. 处理器数量
+2. 数据竞争和缓存乒乓：
+   例如fetch_and_add操作,并采用了std::memory_order_relaxed内存次序,如果俩个线程在两个处理器上运行相同的代码,两个处理器的缓存中将分别形成变量counter的副本,它们必须在两个处理器之间来回传递,两者所含的counter值才可以保持最新,从而正确执行自增操作,如果运行上述代码的处理器数量过多,或者数据处理过快,各处理器可能彼此等待
+   ```c++
+   std::mutex m;
+   my_data data;
+   void processing_loop_with_mutex()
+   {
+      while(true)
+      {
+        std::lock_guard<std::mutex> lk(m);
+        if(done_processing(data)) break;
+      }
+   }
+   ```
+ 假定多个线程要访问数据data和互斥m,那么,若系统具有越多核心或处理器,高度争夺就越可能发生,即处理器可能相互等待
+
+3. 不经意共享
+   假定多个线程要访问一个整型数组,其中各线程都具有专属的元素,且只反复读写自己的元素,由于整型变量的尺寸往往比换存款小很多,因此同一缓存快能够容纳多个数组元素,结果,尽管个线程仅访问数组中属于自己的元素,但仍会让硬件产生缓存乒乓问题,原因是一个缓存块内可能包含了两个线程所需要的元素集合,而数据以缓存块形式传递
+
+4. 数据的紧凑程度
+   太紧凑会发生上述的不经意共享问题,而太稀疏则会导致闲散数据远多于有用数据造成缓存浪费
+
+5. 过度任务切换与线程过饱和
+   
+### 设计数据结构以提升多线程程序的性能
+
+1. 针对复杂操作的数据划分
+2. 其他数据结构的访问模式
+如果互斥与受保护的数据位于同一缓存块中,此时其他线程再试图加锁,那么在互斥上持锁的线程就会遭受性能损失,要确定这种不经意共享是否真的构成问题,其中一种测试方法是针对不同线程并发访问的各项数据,在它们之间加入巨大的填充块
+```c++
+struct protected_data
+{
+    std::mutex m;
+    char padding[std::hardware_destructive_interference_size];
+    my_data data;
+}
+```
+或者,采用下面的代码进行测试,判定数组元素之间是否存在不经意的共享
+```c++
+struct protected_data
+{
+    data_item1 d1;
+    data_item2 d2;
+    char padding[std::hardware_destructive_interference_size];
+};
+my_data some_array[256];
+```
+
+### 设计并发代码时额外要考虑的因素
+1. 并行算法代码中的异常安全
+```c++
+template<typename T>
+struct accumulate_block
+{
+    void operator()(Iterator first,Iterator last,T& result)
+    {
+        result=std::accumulate(first,last,result);
+    }
+};
+
+template<typename Iterator,typename T>
+T parallel_accumulate(Iterator first,Iterator last,T init)
+{
+    unsigned long const length=std::distance(first,last);
+    if(!length) return init;
+    unsigned long const min_per_thread=25;
+    unsigned long const max_threads=(length+min_per_thread-1)/min_per_thread;
+    unsigned long const hardware_threads=std::thread::hardware_concurrency();
+    unsigned long const num_threads=std::min(hardware_threads!=0?hardware_threads:2,max_threads);
+    unsigned long const block_size=length/num_threads;    
+    std::vector<T> results(num_threads);
+    std::vector<std::thread> threads(num_threads-1);
+    Iterator block_start=first;
+    for(unsigned long i=0;i<(num_threads-1);++i)
+    {
+        Iterator block_end=block_start;
+        std::advance(block_end,block_size);
+        threads[i]=std::thread(accumulate_block<Iterator,T>(),block_start,block_end,std::ref(results[i]));
+        block_start=block_end;
+    }
+
+    accumulate_block<Iterator,T>()(block_start,last,results[num_threads-1]);
+    std::for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
+    return std::accumulate(results.begin(),results.end(),init);
+}
+```
+算法需要计算出一个值并将其返回,同时允许相关代码抛出异常
+采用std::packaged_task和std::future改写算法
+```c++
+template<typename Iterator, typename T>
+class accumulate_block  
+{
+    T operator()(Iterator first, Iterator last) 
+    {
+        return std::accumulate(first, last, T{});
+    }
+};
+
+template <typename Iterator,typename T>
+T parallel_accumulate(Iterator first,Iterator last,T init)
+{
+    unsigned long const length=std::distance(first,last);
+    if(!length) return init;
+    unsigned long const min_per_thread=25;
+    unsigned long const max_threads=(length+min_per_thread-1)/min_per_thread;
+    unsigned long const hardware_threads=std::thread::hardware_concurrency();
+    unsigned long const num_threads=std::min(hardware_threads!=0?hardware_threads:2,max_threads);
+    unsigned long const block_size=length/num_threads; 
+    std::vector<std::future<T>> futures(num_threads-1);
+    std::vector<std::thread> threads(num_threads-1);
+    Iterator block_start=first;
+    for(unsigned long i=0;i<num_threads-1;++i)
+    {
+        Iterator block_end=block_start;
+        std::advance(block_end,block_size);
+        std::packaged_task<T(Iterator,Iterator)> task(accumulate_block<Iterator,T>{});
+        futures[i]=task.get_future();
+        threads[i]=std::thread(std::move(task),block_start,block_end);
+        block_start=block_end;
+    }
+    T last_result = accumulate_block<Iterator,T>{}(block_start,last);
+    std::for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
+    T result=init;
+    for(unsigned long i=0;i<num_threads-1;++i)
+    {
+        result+=futures[i].get();
+    }
+    result+ = last_result;
+    return result;
+}  
+```
+上面的修改解决了一个潜在问题:工作线程所抛出的异常会被future捕获，转而在主线程上重新抛出,假设抛出的异常不止一个,那就只有一个异常能够向上传递
+
+从第一个线程创建开始,直到全部汇合完成再有异常可能会导致线程泄露,解决方法是
+```c++
+try{
+    for(unsigned long i=0;i<(num_threads-1);++i)
+    {
+        Iterator block_end=block_start;
+        std::advance(block_end,block_size);
+        threads[i]=std::thread(accumulate_block<Iterator,T>(),block_start,block_end,std::ref(results[i]));
+        block_start=block_end;
+    }
+
+    accumulate_block<Iterator,T>()(block_start,last,results[num_threads-1]);
+    std::for_each(threads.begin(),threads.end(),std::mem_fn(&std::thread::join));
+    }
+    catch(...)
+    {
+        for(unsigned long i=0;i<num_threads;++i)
+        {
+            if(threads[i].joinable()) threads[i].join();
+        }
+        throw;
+    }
+```
+
+更好的解决办法是设计一个类,提取出重复代码
+```c++
+class join_threads
+{
+    std::vector<std::thread>& threads;
+    public:
+    explicit join_threads(std::vector<std::thread>& threads_):threads(threads_){}
+    ~join_threads()
+    {
+        for(unsigned long i=0;i<threads.size();++i)
+        {
+            if(threads[i].joinable()) threads[i].join();
+        }
+    }
+};
+```
+
+2. std::async的线程安全
+std::async会让线程库替我们管控线程,任何生成的线程一但运行完成,对应的future即进入就绪状态,如果不等future进入就绪状态就将其销毁,future对象的析构函数依然会等待期线程运行结束,否则,线程仍会运行，上面的等待巧妙的避免了线程持有指向局部数据的引用导致线程资源丢失的问题
+
+```c++
+template<typename Iterator,typename T>
+T parallel_accumulate(Iterator first,Iterator last,T init)
+{
+    unsigned long const length=std::distance(first,last);
+    unsigned long const max_chunk_size=25;
+    if(length<=max_chunk_size)
+    {
+        return std::accumulate(first,last,init);
+    }
+    else{
+        Iterator mid_point=first;
+        std::advance(mid_point,length/2);
+        std::future<T> first_half_result=std::async(parallel_accumulate<Iterator,T>,first,mid_point,init);
+        T second_half_result=parallel_accumulate(mid_point,last,init);
+        return first_half_result.get()+second_half_result;
+    }
+}
+```
+
+借并发特性改进相应能力
+分离GUI线程和任务线程
+```c++
+std::thread task_thread;
+std::atomic<bool>task_cancelled(false);
+void gui_thread()
+{
+    while(true)
+    {
+        event_data event=get_event();
+        if(event.type==quit) break;
+        process_event(event);
+    }
+}
+
+void task()
+{
+    while(!task_completed()&&!task_cancelled)
+    {
+        do_task_work();
+    }
+    if(task_cancelled)
+    {
+        perform_cleanup();
+    }
+    else
+    {
+        post_gui_event(task_complete);
+    }
+}
+void process(event_data const& event)
+{
+    switch(event.type)
+    {
+        case start_task:
+            task_thread=std::thread(task);
+            break;
+        case cancel_task:
+            task_cancelled=true;
+            task_thread.join();
+            break;
+        default:
+            break;
+    }
+}
+```
+
+### 并发代码的设计实践
+
+并行版std::for_each
+```c++
+template<typename Iterator,typename Func>
+void paralllel_for_each(Iterator first,Iterator last,Func f)
+{
+    unsigned long const length=std::distance(first,last);
+    if(length==0) return;
+    unsigned long const min_per_thread=25;
+    unsigned long const max_threads=(length+min_per_thread-1)/min_per_thread;
+    unsigned long const hardware_threads=std::thread::hardware_concurrency();
+    unsigned long const num_threads=std::min(hardware_threads!=0?hardware_threads:2,max_threads);
+    unsigned long const block_size=length/num_threads;
+    std::vector<std::future<void>> futures(num_threads-1);
+    Iterator block_start=first;
+    for (unsigned long i=0;i<num_threads-1;++i)
+    {
+        Iterator block_end=block_start;
+        std::advance(block_end,block_size);
+        std::packaged_task<void(Iterator,Iterator,Func)> task([=](){
+            std::for_each(block_start,block_end,f);
+        });
+        futures[i]=task.get_future();
+        threads[i]=std::thread(std::move(task));
+        block_start=block_end;
+    }
+    std::for_each(block_start,last,f);
+    for(unsigned long i=0;i<num_threads-1;++i)
+    {
+        futures[i].get();
+    }
+}
+```
+
+采用std::async改写parallel_for_each
+```c++
+template<typename Iterator,typename Func>
+void parallel_for_each(Iterator first,Iterator last,func f)
+{
+    unsigned long const length=std::distance(first,last);
+    if(length==0) return;
+    unsigned long const min_per_thread=25;
+    if(length<2*min_per_thread)
+    {
+        std::for_each(first,last,f);
+    }
+    else
+    {
+        Iterator const mid_point=first+length/2;
+        std::future<void> first_half_result=std::async(parallel_for_each<Iterator,Func>,first,mid_point,f);
+        parallel_for_each(mid_point,last,f);
+        first_half_result.get();
+    }
+}
+``` 
+
+```c++
+template<typename Iterator,typename Func>
+void parallel_for_each(Iterator first,Iterator last,Func f)
+{
+    unsigned long const length=std::distance(first,last);
+    if(length==0) return;
+    unsigned long const min_per_thread=25;
+    if(length<2*min_per_thread)
+    {
+        std::for_each(first,last,f);
+    }
+    else
+    {
+        Iterator const mid_point=first+length/2;
+        std::future<void> first_half_result=std::async(parallel_for_each<Iterator,Func>,first,mid_point,f);
+        parallel_for_each(mid_point,last,f);
+        first_half_result.get();
+    }
+    unsigned long const length=std::distance(first,last);
+    if(length==0) return;
+    unsigned long const min_per_thread=25;
+    unsigned long const max_threads=(length+min_per_thread-1)/min_per_thread;
+    unsigned long const hardware_threads=std::thread::hardware_concurrency();
+    unsigned long const num_threads=std::min(hardware_threads!=0?hardware_threads:2,max_threads);
+    unsigned long const block_size=length/num_threads;
+    std::promise<Iterator> result;
+    std::atomic<bool> done{false};
+    std::vector<std::thread>threads(num_threads-1);
+    {
+        join_threads joiner(threads);
+        Iterator block_start = first;
+        for (size_t i = 0; i < count; i++)
+        {
+           Iterator block_end = block_start;
+           std::advance(block_end,block_size);
+           threads[i]=std::thread(find_element(),block_start,block_end,match,&result,&done);
+        }
+        find_element(first,last,match,&result,&done);
+    }
+    if(!done_result.load())
+    {
+        return last;
+    }
+    return result.get_future().get();
+};
+```
+
+```c++
+
+template<typename Iterator,typename MatchType>
+Iterator parallel_find_impl(Iterator begin, Iterator end, MatchType match, std::atomic<bool>& done)
+{
+    try{
+        unsigned long const length = std::distance(first,last);
+        unsigned long const min_per_thread = 25;
+        if(length < 2*min_per_thread)
+        {
+            for(;first!=last &&!done.load();++first)
+            {
+                done = true;
+                return first;
+            }
+            return last;
+        }
+        else{
+            Iterator const mid_point = first+(length/2);
+            std::future<Iterator> async_result = std::async(&parallel_find_impl<Iterator,MatchType>,mid_point,last,match,std::ref(done));
+            Iterator const direct_result=parallel_find_impl(first,mid_point,match,done);
+            return direct_result!=last?direct_result:async_result.get();
+        
+        }
+    }
+    catch(...){
+        done = true;
+        throw;
+    
+    }
+}
+
+template<typename Iterator,typename MatchType>
+Iterator parallel_find(Iterator first, Iterator last, MatchType match)
+{
+    std::atomic<bool> done(false);
+    return parallel_find_impl(first,last,match,done);
+}
+```
+
+并行化std::partial_sum
+以划分数据段计算前缀和
+```c++
+template<typename Iterator>
+void parallel_partial_sum(Iterator first, Iterator last)
+{
+    typedef typename Iterator::value_type value_type;
+    struct process_chunk
+    {
+        void operator()(Iterator begin,Iterator last,std::future<value_type>* previous_end_value,std::promise<value_type>*end_value)
+        {
+            try
+            {
+                Iterator end = last;
+                ++end;
+                std::partial_sum(begin, end, begin);
+                if(previous_end_value)
+                {
+                    value_type& addend = previous_end_value->get();
+                    *last+=addend;
+                    if(end_value)
+                    {
+                        end_value->set_value(*last);
+                    }
+                    std::for_each(begin,last,[addend](value_type& item){
+                        item+=addend;
+                    });
+                }
+                else if(end_value)
+                {
+                    end_value->set_value(*last);
+                }
+                                                                                                                            
+            }
+            catch(...)
+            {
+                if(end_value) end_value->set_exception(std::current_exception());
+                else throw;
+            }
+        };
+    };
+    unsigned long const length=std::distance(first,last);
+    if(length==0) return;
+    unsigned long const min_per_thread=25;
+    unsigned long const max_threads=(length+min_per_thread-1)/min_per_thread;
+    unsigned long const hardware_threads=thread::hardware_concurrency();
+    unsigned long const num_threads=std::min(hardware_threads!=0?hardware_threads:2,max_threads);
+    unsigned long const chunk_size=length/num_threads;
+    typedef typename Iterator::value_type value_type;
+    std::vector<std::thread> threads(num_threads-1);
+    std::vector<std::future<value_type> > previous_end_values(num_threads-1);
+    std::vector<std::promise<value_type> > end_values(num_threads-1);
+    previout_end_values.reserve(num_threads-1);
+    join_threads joiner(threads);
+    Iterator block_start=first;
+    for(unsigned long i=0;i<(num_threads-1);++i)
+    {
+        Iterator block_last=block_start;
+        std::advance(block_last,block_size-1);
+        threads[i] = std::thread(process_chunk(),block_start,block_last,(i!=0)?&previous_end_values[i-1]:0,&end_values[i]);
+        block_start=block_last;
+        ++block_start;
+        previous_end_values[i].push_back(end_values[i].get_future());
+    }
+    Iterator final_element = block_start;
+    std::advance(final_element,std::distance(block_start,last)-1);
+    process_chunk()(block_start,final_element,(num_threads>1)?&previous_end_values.back():0,0);
+}
+```
+上面的代码通过分段计算前缀和,再分批加上前一段的末尾和来计算
+别计算出{1,3,6} 、 {4,9,15} 、 {7,15,24} 。第一段的末项值
+为 6, 我们将它与第二段的结果逐项相加，得到 {1, 3, 6} 、 {10 , 15, 21} 、 {7, 15 , 24 } 。 第
+二段的末项值是 21, 它接着与第三段（也是最后的数据段）的结果依次相加 ， 产生最终
+结果 {l, 3, 6} 、 {10, 15, 21} 、 {28,36,45} 。
+
+```c++
+struct barrier
+{
+    std::atomic<unsigned> count;
+    std::atomic<unsigned> spaces;
+    std::atomic<unsigned> generation;
+    public:
+    explicit barrier(unsigned count):count(count),spaces(count),generation(0){}
+    void wait()
+    {
+        unsigned const my_generation=generation;
+        if(!--spaces)//当空座递减为0时，说明所有线程都已经到达线程卡,generation才更新
+        {
+            spaces=count.load();
+            ++generation;
+        }
+        else{
+            while(generation==my_generation)
+                std::this_thread::yield();
+        }
+    }
+    void done_waiting()//减少线程,剔除线程卡
+    {
+        --count;        
+        if(!--spaces)
+        {
+            spaces=count.load();
+            ++generation;
+        }
+    }
+};
+
+template<typename Iterator>
+void parallel_partial_sum(Iterator first,Iterator last)
+{
+    typedef typename Iterator::value_type value_type;
+    struct process_element
+    {
+        void operator()(Iterator first,Iterator last,std::vector<value_type>&buffer,unsigned i,barrier&b)
+        {
+            value_type& ith_element=*(first+i);
+            bool update_source = false;
+            for(unsigned step=0,stride=1;stride<=i;++step,stride*=2)
+            {
+                value_type const& source = (step%2)? buffer[i]:ith_element;
+                value_type & dest = (step%2)? itehr_element:buffer[i];
+                value_type const& addend = (step%2)? buffer[i-stride]:*(first+i-stride);
+                dest=source+addend;
+                update_source = !(step%2);
+                b.wait();
+            }
+            if(update_source)
+            {
+                ith_element = buffer[i];
+            }
+            b.done_waiting();
+        }
+    };
+    unsigned long const length=std::distance(first,last);
+    if(length<=1) return;
+    std::vector<value_type> buffer(length);
+    barrier b(length);
+    std::vector<std::thread> threads(length-1);
+    join_threads joiner(threads);
+    Iterator block_start=first;
+    for(unsigned long i=0;i<length-1;++i)
+    {
+        threads[i]=std::thread(process_element(),first,last,std::ref(buffer),i,std::ref(b));
+    }
+    process_element()(first,last,std::ref(buffer),length-1,std::ref(b));
+}
+```
+上面的代码通过逐轮计算前缀和,并通过栅栏同步线程,减少线程卡
+以2的次幂进行划分数据段,并行计算前缀和
+假设我们还是计算序列{1,2,3,4,5,6,7,8,9}的前缀和，那么第一轮操作便会得出 {l, 3, 5, 7, 9, 11, 13, 15, 17}, 其中前两个元素即为最终结果。第二轮操作会得到 {1, 3, 6, 10, 14, 18, 22, 26, 30}, 这时前 4 项元素已完成计算。第三轮如乍后我们求出 {1, 3, 6, 10, 15, 21, 28, 36, 44}, 其中前 8 项元素都是正确结果，最后一轮会产生 {l, 3, 6, 10, 15 ,21, 28, 36, 45}
+
+---
+
+## 高级线程管理
+### 线程池
+线程池的最简单实现是,采用数目固定的工作线程,每当有任务需要处理时,调用函数让它放在任务队列中
+等待,各工作线程从队列中领取指定的任务并运行,然后再回到队列领取其他任务
+```c++
+class thread_pool
+{
+    std::atomic_bool done;
+    threadsafe_queue<std::function<void() >> work_queue;
+    std::vector<std::thread> threads;
+    join_threads joiner;
+    void worker_thread()
+    {
+        while(!done)
+        {
+            std::function<void()>task;
+            if(work_queue.try_pop(task))
+            {
+                task();
+            }
+            else
+            {
+                std::this_thread::yield();
+            }
+        }
+    }
+    public:
+    thread_pool():done(false),joiner(threads)
+    {
+        unsigned const thread_count= std::thread::hardware_concurrency();
+        try{
+            for(unsigned i=0;i<thread_count;++i)
+            {
+                threads.push_back(std::thread(&thread_pool::worker_thread,this));
+            }
+        }
+        catch(...)
+        {
+            done=true;
+            throw;
+        
+        }
+    }
+    ~thread_pool()
+    {
+        done=true;
+    }
+    template<typename FunctionType>
+    void submit(FunctionType f)
+    {
+        work_queue.push(std::function<void() > (f));
+    }
+
+};
+```
+
+一个线程池,使用者可以等待池内任务完成
+```c++
+class function_wrapper{
+    struct impl_base{
+        virtual void call()=0;
+        virtual ~impl_base(){}
+    };
+    std::unique_ptr<impl_base> impl;
+    template<typename F>
+    struct impl_type:impl_base
+    {
+        F f;
+        impl_type(F f_):f(std::move(f_)){}
+        void call(){F();}
+    };
+    public:
+    template<typename F>
+    function_wrapper(F &&f):impl(new impl_type<F>(std::move<F>(f))){}
+    void operator()()
+    {
+        impl->call();
+    }
+    function_wrapper()=default;
+    function_wrapper(function_wrapper && other)
+    {
+        impl = std::move(other.impl);
+    }
+    function_wrapper & operator=(function_wrapper && other)
+    {
+        impl = std::move(other.impl);
+        return *this;
+    }
+    function_wrapper(const function_wrapper & other) = delete;
+    function_wrapper(function_wrapper && other) = delete;
+    function_wrapper& operator=(const function_wrapper & other) = delete;
+};
+class thread_pool{
+    threadsafe_queue<function_wrapper> work_queue;
+    std::atomic_bool done;
+
+    void worker_thread()
+    {
+        while(!done)
+        {
+            function_wrapper task;
+            if(work_queue.try_pop(task))
+            {
+                task();
+            }
+            else
+            {
+                std::this_thread::yield();
+            }
+        }
+        
+    }
+    public:
+    template<typename FunctionType>
+    std::future<typename std::result_of<FunctionType()>::type> submit(FunctionType f)
+    {
+        typedef typename std::result_of<FunctionType()>::type result_type;
+        std::packaged_task<result_type()> task(std::move(f));
+        std::future<result_type> res(task.get_future());
+        work_queue.push(std::move(task));
+        return res;
+    }
+    ~thread_pool()
+    {
+        done=true;
+    }
+};
+```
+我们把函数f 包装在 std: :packaged_task<result_type()>中，因为句是函数或可调用对象，不接收参数，返回值是 result_type 型别的实例。根据推导 ，两者彼此相
+符。接着，我们从 std: :packaged_tas k<> 取得对应的futur忒趴然后将任务压入队列 ，
+再向 submit的调用者返回future）。请注意，由于 std: :packaged_tas k<>不可复制 ，因此
+一定要通过 std::move 把任务压入队列。照此修改，任务队列存储的元素是function_wrapper 对象，而不再是 std::function<void>对象。现在，线程池遂能够依从前文的新
+方式处理任务 
+
+
+采用线程池实现的parallel_accumulate()函数,运算过程及等待池内任务完成
+```c++
+template<typename Iterator,typename T>
+T parallel_accumulate(Iterator first,Iterator last,T init)
+{
+    unsigned long const length=std::distance(first,last);
+    if(!length) return init;
+    unsigned long const block_size=25;
+    unsigned long const num_blocks= (length+block_size-1)/block_size;
+    thread_pool pool;
+    std::vector<std::future<T>> futures(num_blocks-1);
+    Iterator block_start=first;
+for(unsigned long i=0;i<num_blocks-1;++i)
+    {
+        Iterator block_last=block_start;
+        std::advance(block_last,block_size);
+        futures[i]=pool.submit([=]{
+            accumulate_block(block_start,block_last);
+        });
+        block_start=block_last;
+    }
+    T last_result=accumulate_block<Iterator,T>(block_start,last);
+    T result = init;
+    for(unsigned long i=0;i<num_blocks-1;++i)
+    {
+        result+=futures[i].get();
+    }
+    result+=last_result;
+    return result;
+}
+```
+
+线程数目有限,若耗尽了空闲线程,就可能令他们全都停滞不前,空等哪些尚待调度执行的任务
+因此,我们需要采用的解决办法与第8章相似,在等待目标数据块完成操作的过程中,主动处理相关的还未排序的数据块
+若采用线程池管理任务列表及其关联线程,则完全不必直接访问任务列表就能达到目的,这正是线程池的意义
+
+``` c++
+void thread_pool::run_pending_task()
+{
+    function_wrapper task;
+    if(work_queue.try_pop(task))
+    {
+        task();
+    }
+    else
+    {
+        std::this_thread::yield();
+    }
+}
+```
+这个实现原样提取了worker_thread()函数的主循环,并作为run_pending_task()函数而被调用
+基于线程池的快速排序实现
+```c++
+template<typename T>
+struct sorter
+{
+    thread_pool pool;
+    std::list<T> do_sort(std::list<T>& chunk_data)
+    {
+        if(chunk_data.empty())
+        {
+            return chunk_data;
+        }
+        std::list<T> result;
+        result.splice(result.begin(),chunk_data,chunk_data.begin());//将划分点提前存入result
+        T const& partition_val=*result.begin();
+        Typename std::list<T>::iterator divide_point=std::partition(chunk_data.begin(),chunk_data.end(),[&](T const& val){return val<partition_val;});
+        std::list<T> new_lower_chunk;
+        new_lower_chunk.splice(new_lower_chunk.end(),chunk_data,chunk_data.begin(),divide_point);
+        std::future<std::list<T>> new_higher(do_sort(chunk_data));
+        result.splice(result.end(),new_higher.get());
+        while(new_lower.wait_for(std::chrono::milliseconds(0))==std::future_status::timeout)
+        {
+            pool.run_pending_task();
+        }
+        result.splice(result.begin(),new_lower.get());
+        return result;
+    }
+};
+
+template<typename T>
+std::list<T> parallel_quick_sort(std::list<T> input)
+{
+    if(input.empty())
+    {
+        return input;
+    }
+    sorter<T> s;
+    return s.do_sort(input);
+}
+```
+
+线程池仅具备一个任务队列供多线程共用,在同一个线程池实例上,每当有线程调用submit()函数,就把新任务压入该队列,类似地,为了执行任务,工作线程不断从这一队列弹出任务
+
+为了解决缓存乒乓问题,为每个线程配备独立的任务队列,各线程只在自己的队列上发布新任务,仅当线程自身的队列没有任务时,才会从全局队列领取任务、
+
+```c++
+class thread_pool
+{
+    threadsafe_queue<function_wrapper> pool_work_queue;
+    typedef std::queue<function_wrapper> local_queue_type;
+    static thread_local std::unique_ptr<local_queue_type> local_work_queue;
+    
+    void worker_thread()
+    {
+        local_work_queue.reset(new local_queue_type);
+        while(true)
+        {
+            run_pending_task();
+        }
+    }
+    public:
+    template<typename FunctionType>
+    std::future<typename std::result_of<FunctionType()>::type>submit(FunctionType f)
+    {
+        typedef typename std::result_of<FunctionType()>::type result_type;
+        std::packaged_task<result_type()> task(f);
+        std::future<result_type> res(task.get_future());
+        if(local_work_queue)
+        {
+            local_work_queue->emplace(std::move(task));
+        }
+        else
+        {
+            pool_work_queue.push(std::move(task));
+        }
+        return res;
+    }
+    void run_pending_task()
+    {
+        function_wrapper task;
+        if(local_work_queue && !local_work_queue->empty())
+        {
+            task = std::move(local_work_queue->front());
+            local_work_queue->pop();
+            task();
+        }
+        else if(pool_work_queue.try_pop(task))
+        {
+            task();
+        }
+        else
+        {
+            std::this_thread::yield();
+        }
+    }
+    
+};
+```
+当线程自身的队列没有任务时,才会从全局队列领取任务,其中采用了thread_local变量,从而令每个线程都具有自己的任务队列,线程池本身则再维护一全局队列
+
+#### 任务窃取
+有且只有 thread_local 关键字修饰的变量具有线程（thread）周期，这些变量在线程开始的时候被生成，在线程结束的时候被销毁，并且每一个线程都拥有一个独立的变量实例。
+thread_local 一般用于需要保证线程安全的函数中。
+
+需要注意的一点是，如果类的成员函数内定义了 thread_local 变量，则对于同一个线程内的该类的多个对象都会共享一个变量实例，并且只会在第一次执行这个成员函数时初始化这个变量实例，这一点是跟类的静态成员变量类似的。
+```c++
+#ifndef STEALING_THREAD_POOL_HPP
+#define STEALING_THREAD_POOL_HPP
+#include <iostream>
+#include "mingw.shared_mutex.h"
+#include "mingw.thread.h"
+#include "mingw.condition_variable.h"
+#include "mingw.mutex.h"
+#include "mingw.future.h"
+#include <list>
+#include "thread_safe_stack.hpp"
+#include <memory>
+#include <vector>
+#include <algorithm>
+#include <atomic>
+#include <queue>
+#include "join_threads.hpp"
+#include "threadsafe_queue.hpp"
+class function_wrapper{
+    struct impl_base{
+        virtual void call()=0;
+        virtual ~impl_base(){}
+    };
+    std::unique_ptr<impl_base> impl;
+    template<typename F>
+    struct impl_type:impl_base
+    {
+        F f;
+        impl_type(F f_):f(std::move(f_)){}
+        void call(){F();}
+    };
+    public:
+    template<typename F>
+    function_wrapper(F &&f):impl(new impl_type<F>(std::move<F>(f))){}
+    void operator()()
+    {
+        impl->call();
+    }
+    function_wrapper()=default;
+    function_wrapper(function_wrapper && other)
+    {
+        impl = std::move(other.impl);
+    }
+    function_wrapper & operator=(function_wrapper && other)
+    {
+        impl = std::move(other.impl);
+        return *this;
+    }
+    function_wrapper(const function_wrapper & other) = delete;
+    function_wrapper(function_wrapper && other) = delete;
+    function_wrapper& operator=(const function_wrapper & other) = delete;
+};
+class work_stealing_queue
+{
+    private:
+        typedef function_wrapper data_type;
+        std::deque<data_type> the_queue;
+        mutable std::mutex the_mutex;
+    public:
+        work_stealing_queue(){}
+        work_stealing_queue(const work_stealing_queue& other)=delete;
+        work_stealing_queue& operator=(const work_stealing_queue& other)=delete;
+        void push(data_type data)
+        {
+            std::lock_guard<std::mutex> lock(the_mutex);
+            the_queue.push_front(std::move(data));
+        }
+        bool empty() const
+        {
+            std::lock_guard<std::mutex> lock(the_mutex);
+            return the_queue.empty();
+        }
+        bool try_pop(data_type& res)
+        {
+            std::lock_guard<std::mutex> lock(the_mutex);
+            if(the_queue.empty())
+            {
+                return false;
+            }
+            res = std::move(the_queue.front());
+            the_queue.pop_front();
+            return true;
+        }
+        bool try_steal(data_type& res)
+        {
+            std::lock_guard<std::mutex> lock(the_mutex);
+            if(the_queue.empty()){return false;}
+            res = std::move(the_queue.back());
+            the_queue.pop_back();
+            return true;
+        }
+};
+
+class thread_pool
+{
+    typedef function_wrapper task_type;
+    std::atomic_bool done;
+    threadsafe_queue<task_type> pool_work_queue;
+    std::vector<std::unique_ptr<work_stealing_queue>> queues;
+    std::vector<std::thread> threads;
+    join_threads joiner;
+    static thread_local work_stealing_queue* local_work_queue;
+    static thread_local unsigned my_index;
+    void worker_thread(unsigned my_index_)
+    {
+        my_index = my_index_;
+        local_work_queue= queues[my_index].get();
+        while (!done)
+        {
+            run_pending_task();
+        }   
+    }
+    bool pop_task_from_local_queue(task_type& task)
+    {
+       return local_work_queue&& local_work_queue->try_pop(task); 
+    }
+    bool pop_task_from_pool_queue(task_type& task)
+    {
+        return pool_work_queue.try_pop(task);
+    }
+    bool pop_task_from_other_queue(unsigned index, task_type& task)
+    {
+        for(unsigned i=0;i<queues.size();++i)
+        {
+            unsigned const index = (my_index+i+1)%queues.size();
+            if(queues[index]->try_steal(task))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    public:
+    thread_pool():done(false),joiner(threads)
+    {
+        unsigned const thread_count=std::thread::hardware_concurrency();
+        try{
+            for(unsigned i=0;i<thread_count;++i)
+            {
+                queues.push_back(std::unique_ptr<work_stealing_queue>(new work_stealing_queue));
+            }
+            for (unsigned i = 0; i < thread_count; ++i)
+            {
+                threads.push_back(std::thread(&thread_pool::worker_thread, this, i));
+            }
+        }
+        catch(...)
+        {
+            done=true;
+            throw;
+        }
+    }
+    ~thread_pool()
+    { done=true; }
+    template<typename FunctionType>
+    std::future<typename std::result_of<FunctionType()>::type_result_type> submit(FunctionType f){
+        typedef typename std::result_of<FunctionType()>::type result_type;
+        std::packaged_task<result_type()> task(f);
+        std::future<result_type> res(task.get_future());
+        if(local_work_queue)
+        {
+            local_work_queue->push(std::move(task));
+        }
+        else{
+            pool_work_queue.push(std::move(task));
+        }
+        return res;
+    }
+    void run_pending_task()
+    {
+        task_type task;
+        if(pop_task_from_local_queue(task)|| pop_task_from_pool_queue(task)||pop_task_from_other_queue(my_index,task))
+        {
+            task();
+        }
+        else{
+            std::this_thread::yield();
+        }
+    }
+};
+
+
+#endif // STEALING_THREAD_POOL_HPP
+```
+若线程池内某线程无事可做,就会范文众线程的专属队列,试图为该线程窃取任务,这样,run_pending_task()就会尝试从线程自己的队列领取任务,也会尝试从线程池的全局队列领取任务,还会尝试从其他线程的队列窃取任务
+
+---
+
+### 中断线程
+```c++
+class interrupt_flag
+{
+    public:
+        void set();
+        bool is_set() const;
+};
+thread_local interrupt_flag this_thread_interrupt_flag;
+class interruptible_thread
+{
+    std::thread internal_thread;
+    interrupt_flag* flag;
+    public:
+        template<typename FunctionType>
+        interruptible_thread(FunctionType f)
+        {
+            std::promise<interrupt_flag*> p;
+            internal_thread = std::thread([f,&p]{
+                p.set_value(&this_thread_interrupt_flag);
+                f();
+            });
+            flag = p.get_future().get();
+        }
+        //中断异常传递版本的初始化
+        interruptible_thread(FunctionType f)
+        {
+            std::promise<interrupt_flag*> p;
+            internal_thread = std::thread([f,&p]{
+                p.set_value(&this_thread_interrupt_flag);
+            try{
+                f();
+            }
+            catch(thread_interrupted const& e)
+            {
+                handle_interruption();
+            }
+            });
+            flag = p.get_future().get();
+        }
+         
+        void interrupt()
+        {
+            if(flag)
+            {
+                flag->set();
+            }
+        };
+        void interruption_point()
+        {
+            if(this_thread_interrupt_flag.is_set())
+            {
+                throw thread_interrputed();
+            }
+        }
+        void foo()
+        {
+            while(!done)
+            {
+                interruption_point();
+                process_next_item();
+            }
+        }
+};
+```
+上面的代码如果使用wait就无法进入interruption_point()函数,因为wait会一直阻塞,直到线程结束,而interruption_point()函数需要在线程阻塞时检测中断标志,如果中断标志被设置,则抛出异常
+针对条件变量std::condition_variable的interruptble_wait()函数,但存在瑕疵
+```c++
+void interruptible_wait(std::condition_variable& cv,std::unique_lock<std::mutex>& lk)
+{
+    interruption_point();
+    this_thread_interrupt_flag.set_condition_variable(cv);
+    cv.wait(lk);
+    this_thread_interrupt_flag.clear_condition_variable();
+    interruption_point();
+}
+```
+函数先检测中断是否发生,再把条件变量与当前线程的中断标志关联起来,接着在条件变量上等待,继而解除关联,最后再次检测中断.
+在目标线程等待条件变量期间,若需要它中断,引发中断的线程就向条件变量广播,唤醒正在其上等待的全部线程
+
+上面的代码如果在wait处抛出异常,函数会直接退出而中断标志和条件变量之间的关联没有被解除——可以通过中断标志的析构函数解除关联
+
+另一个问题为条件竞争,如果在wait之前就被中断那么条件变量是否关联中断标志就无所谓了,但是如果在wait之后被中断如果不是进入interruption_point()函数,那么条件变量关联的中断标志就不会被解除,导致线程无法正常退出,因此需要在wait之后解除关联
+我们需要保证之间目标线程不会被唤醒,利用锁lk同时保护上述两个动作,但同时可能发生锁是否成功锁住和死锁的问题
+另一方法是调用wait_for替代wait,但超时时间难以设计,会出现反复唤醒的问题
+
+针对条件变量std::condition_variable的interruptible_wait()函数,它支持超时就停止
+```c++
+class interrupt_flag
+{
+    std::atomic<bool> flag;
+    std::condition_variable* thread_cond;
+    public:
+    interrupt_flag():thread_cond(0){};
+    void set()
+    {
+        flag.store(true,std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lk(set_clear_mutex);
+        if(thread_cond)
+        {
+            thread_cond->notify_all();
+        }
+    }
+    bool is_set() const
+    {
+        return flag.load(std::memory_order_relaxed);
+    }
+    void set_condition_variable(std::condition_variable& cv)
+    {
+        std::lock_guard<std::mutex> lk(set_clear_mutex);
+        thread_cond=&cv;
+    }
+    void clear_condition_variable()
+    {
+        std::lock_guard<std::mutex> lk(set_clear_mutex);
+        thread_cond=0;
+    
+    }
+    struct clear_cv_on_destruct
+    {
+        ~clear_cv_on_destruct()
+        {
+            this_thread_interrupt_flag.clear_condition_variable();
+        }
+    };
+};
+
+void interruptible_wait(std::condition_variable& cv,std::unique_lock<std::mutex>& lk)
+{
+    interruption_point();
+    this_thread_interrupt_flag.set_condition_variable(cv);
+    interrupt_flag::clear_cv_on_destruct guard;
+    interruption_point();
+    cv.wait_for(lk,std::chrono::milliseconds(1));
+    interruption_point();
+}
+```
+如果我们需要等待某个断言成立,那么就可以把1ms的时限完全融合到断言循环之中
+```c++
+template<typename Predicate>
+void interruptible_wait_for(std::condition_variable& cv,std::unique_lock<std::mutex>& lk,Predicate pred)
+{
+    interruption_point();
+    this_thread_interrupt_flag.set_condition_variable(cv);
+    interrupt_flag::clear_cv_on_destruct guard;
+    while(!this_thread_interrupt_flag.is_set()&&!pred())
+    {
+        cv.wait_for(lk,std::chrono::milliseconds(1));
+    }
+    interruption_point();
+}
+
+```
+
+##### 中断条件变量std::condition_variable_any上的等待
+
+std::condition_variable_any与std::condition_variable的区别在于前者可以配合任意型别的锁,而后者仅限于std::unique
+_lock<std::mutex> 
+
+std::condition_variable_any适配任意的锁，所以效果更好,interrupt_flag标志中内涵的互斥set_clear_mutex也可以传给wait
+```c++
+class  interrupt_flag
+{
+    std::atomic<bool> flag;
+    std::condition_variable* thread_cond;
+    std::condition_variable_any* thread_cond_any;
+    std::mutex set_clear_mutex;
+    public:
+    interrupt_flag():thread_cond(0),thread_cond_any(0){};
+    void set()
+    {
+        flag.store(true,std::memory_order_relaxed);
+        std::lock_guard<std::mutex>lk(set_clear_mutex);
+        if(thread_cond)
+        {
+            thread_cond->notify_all();
+        }
+        else if(thread_cond_any)
+        {
+            thread_cond_any->notify_all();
+        }
+    }
+    template<typename Lockable>
+    void wait(std::condition_variable_any& cv,Lockable& lk)
+    {
+        struct custom_lock
+        {
+            interrupt_flag* self;
+            Lockable& lk;
+            custom_lock(interrupt_flag* self_,
+            std::condition_variable_any& cond,Lockable& lk_):self(self_),lk(lk_)
+            {
+                self->set_clear_mutex.lock();
+                self->thread_cond_any=&cond;
+            }
+            void unlock()
+            {
+                lk.unlock();
+                self->set_clear_mutex.unlock();
+            }
+            void lock()
+            {
+                std::lock(self->set_clear_mutex,lk);
+            }
+        };
+        custom_lock cl(this,cv,lk);
+        interruption_point();
+        cv.wait(cl);
+        interruption_point();
+    }  
+};
+
+template<typename Lockable>
+void interruptible_wait(std::condition_variable_any& cv,Lockable& lk)
+{
+    this_thread_interrupt_flag.wait(cv,lk);
+}
+```
+余下代码与std::condition_variable时的interrupt_flag 相同
+
+
+##### 中断其他阻塞型等待
+上面的代码补全了条件变量上的等待,但和存在包括互斥锁,future等等的等待
+一般的方法是借助std::condition_variable所用到的限时功能
+```c++
+template<typename T>
+void interruptible_wait(std::future<T>& uf)
+{
+    while(!this_thread_flag.is_set())
+    {
+        if(uf.wait_for(lk,std::chrono::milliseconds(1))==std::future_status::ready)
+        break;
+    }
+    interruption_point();
+}
+```
+该函数一直等待,直到中断标志被设置为成立才停止,或等到future准备就绪才停止,但函数内部以1ms为时限,在future上反复进行阻塞型等待
+wait_for()往往会至少等待一个完整的计时单元,因此,如果所用时钟的计时单元是15ms,我们就得等待15ms才会检测到中断,这会导致效率低下
+
+
+##### 处理中断
+从上述代码中interruption_point()函数的作用是检测中断标志,如果中断标志被设置,则抛出异常,但该函数的实现依赖于具体的平台,因此,我们需要自己实现该函数
+可以用try/catch捕获
+```c++
+try{
+    do_something();
+}
+catch(thread_interrupted const& e)
+{
+    handle_interruption();//处理中断
+}
+```
+我们通常希望让中断直接终结线程,故可让中断异常向上传播,但是
+std::thread在构造时设定了线程函数,一旦异常传播到函数外,std::terminate()就会被调用,从而终止整个程序
+
+由于interrupt_thread是thread的包装类,所以初始化时同样需要传入线程函数并加上catch块,为了防止忘记这么做,可以在类的初始化代码中防止catch块,通过上述操作中断只会终止一个线程
+
+```c++
+class interruptible_thread
+{
+    std::thread internal_thread;
+    interruptibale_thread(...)
+    {
+        internal_thread = std::thread([f,&p]{
+            p.set_value(&this_thread_interrupt_flag);
+            try{
+                f();
+            }
+            catch(thread_interrupted const& e)
+            {
+                handle_interruption();
+            }
+        });
+    }
+};
+```
+
+##### 在应用程序退出时中断后台任务
+为了使文件索引及时更新总是维持最新状态,ing哟个程序需要不听运行,而当应用程序关闭时,我们需要依次结束后台程序，其中一种做法就是中断
+在后台监控文件系统
+```c++
+std::mutex config_mutex;
+std::vector<interruptible_thread> background_threads;
+void background_task(int disk_id)
+{
+    while(true)
+    {
+        interruption_point();
+        fs_change fsc=get_fs_change(disk_id);
+        if(fsc.has_changes())
+        {
+            update_index(fsc);
+        }
+    }
+}
+
+void start_background_processing()
+{
+    background_threads.push_back(interruptible_thread(background_thread,disk_1));
+    background_threads.push_back(interruptible_thread(background_thread,disk_2));
+}
+
+int main()
+{
+    start_background_processing();
+    process_gui_until_exit();
+    std::unique_lock<std::mutex> lk(config_mutex);
+    for(unsigned i=0;i<background_threads.size();++i)
+    {
+        background_threads[i].interrupt();
+    }
+    for(unsigned i=0;i<background_threads.size();++i)
+    {
+        background_threads[i].join();
+    }
+    return 0;
+}
+```
+因为一个线程不会因为中断立即结束,所以选择先中断所有线程,再等待所有线程结束
+
+---
+
+## 并行算法函数
+c++17引入了并行算法函数,它们是新引入的多个函数重载
+std::execution::par向标准库示意,允许调用采用多线程,按并行算法的形式执行
+其制定了三种策略:
+- std::execution::sequenced_policy: 串行执行
+- std::execution::parallel_policy: 并行执行
+- std::execution::parallel_unsequenced_policy: 并行执行,但不保证顺序
+它们是三个类,由头文件execution定义,分别对应三个策略,该头文件还定义了三个对应的策略对象,作为参数向算法传递
+std::execution::seq
+std::execution::par
+std::execution::par_unseq
+
+#### 因指定执行策略而普遍产生的作用
+1. 异常行为:如果按某种执行策略调用算法,而期间有异常抛出,则后果取决于所选用的执行策略
+std::for_each(std::execution::par,v.begin(),v.end(),[](auto x){throw my_exception();});
+普通版本异常std::bad_alloc会抛出向外传播,而重载版本则会令整个程序终止
+
+2. 算法中间步骤的执行起点和时机
+执行策略指定了算法函数的中间步骤的执行主体
+
+#### std::execution::sequenced_policy
+顺序策略与并行无关,它令算法函数在发起调用的线程上执行 全部操作,所有操作都由同一个线程执行,还必须服从一定的次序
+
+#### std::execution::parallel_policy
+
+函数的内部操作可以在发起调用的线程上执行,也可以由程序库另外创建线程执行,给定一项操作,它会固定在一个线程上完整执行到底
+std::for_each(std::execution::parallel,v.begin(),v.end(),[](int& x){x+=count;});
+
+而std::for_each(std::execution::par,v.begin(),v.end(),[](int& x){x+=++count;});则会因为发生数据竞争而存在问题
+
+一个具有内部同步功能的类,以及作用在其上的并行算法函数操作
+```c++
+class X
+{
+    mutable std::mutex m;
+    int data;
+    public:
+    X():data(0){};
+    int get_value() const{
+        std::lock_guard<std::mutex> guard(m);
+        return data;
+    
+    }
+    void increment()
+    {
+        std::lock_guard<std::mutex> guard(m);
+        ++data;
+    }
+    
+};
+void increment_all(std::vector<X>& v)
+{
+    std::for_each(std::execution::par,v.begin(),v.end(),[](X& x){
+        x.increment();
+    });
+}
+```
+
+上面的代码可以采用std::execution::par_unseq，因为每个元素都具备一个互斥
+
+#### 访问计数
+```c++
+#include <vector>
+#include <iostream>
+#include <unordered_map>
+#include <numeric>
+
+struct log_info{
+    std::string page;
+    time_t visit_time;
+    std::string browser;
+};
+
+extern log_info parse_log_line(std::string const&line);
+
+using visit_map_type = std::unordered_map<std::string,unsigned long long>;
+
+visit_map_type count_visits_per_page(std::vector<std::string> const&log_lines)
+{
+    struct combine_visits{
+        visit_map_type operator()(visit_map_type lhs,visit_map_type rhs)const{
+            if(lhs.size()<rhs.size()) std::swap(lhs,rhs);
+            for(auto& entry:rhs){
+                lhs[entry.first]+=entry.second;
+            }
+            return lhs;
+        }
+    }
+    visit_map_type operator()(log_info log,visit_map_type visits)const{
+        ++map[log.page];
+        return map;
+    }
+    visit_map_type operator()(visit_map_type map,log_info log)const{
+        ++map[log.page];
+        return map;
+    }
+    visit_map_type operator()(log_info log1,log_info log2) const{
+        visit_map_type map;
+        ++map[log1.page];
+        ++map[log2.page];
+        return map;
+    };
+    return std::transform_reduce(std::execution::par_unseq,log_lines.begin(),log_lines.end(),visit_map_type(),combine_visits(),parse_log_line);
+};
+
+```
+std::for_each 仅遍历元素
+std::transform 遍历元素并将返回值放入容器
+```c++
+std::for_each(nums.begin(), nums.end(), [](int &i) { i *= 2; });
+std::transform(nums.begin(), nums.end(), nums.begin(), [](int i) { return i * 2; });
+```
+---
+
+## 多线程应用的测试和除错
+
+与并发相关联的错误分为两大类:
+1. 多余的阻塞
+2. 条件竞争
+
+ 
 
