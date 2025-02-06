@@ -1,0 +1,22 @@
+{
+    "files.associations": {
+        "fcntl.h": "c",
+        "xlocmes": "cpp",
+        "xutility": "cpp",
+        "array": "cpp",
+        "vector": "cpp",
+        "xstring": "cpp",
+        "istream": "cpp",
+        "functional": "cpp",
+        "ostream": "cpp",
+        "xlocmon": "cpp",
+        "xlocnum": "cpp",
+        "xloctime": "cpp",
+        "format": "cpp",
+        "xiosbase": "cpp",
+        "algorithm": "cpp",
+        "xlocale": "cpp",
+        "iosfwd": "cpp",
+        "sstream": "cpp"
+    }
+}
