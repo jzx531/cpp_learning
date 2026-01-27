@@ -3,8 +3,27 @@
 
 #include "Cache.h"
 
+template<typename T>
+class LRUCache;
+
+template<typename T>
+class DLinkedNode{
+   friend class LRUCache<T>;
+   private: 
+      int key;
+      T value;
+      DLinkedNode* prev;
+      DLinkedNode* next;
+      DLinkedNode(): key(0), value(T()), prev(nullptr), next(nullptr) {}
+      DLinkedNode(int k, const T& v): key(k), value(v), prev(nullptr), next(nullptr) {}
+};
+
 template<typename T> 
 class LRUCache : public Cache<T> {
+    private:
+        std::unordered_map<int, DLinkedNode<T>*> cache_map;
+        DLinkedNode<T>* head;
+        DLinkedNode<T>* tail;
     public:
         LRUCache(int capacity);        
         T get(int key) override;
