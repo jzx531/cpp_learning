@@ -5,7 +5,7 @@
 
 CXX = g++
 
-CXXFLAGS := -std=c++17 -Wall -Wextra -g
+CXXFLAGS := -std=c++17 -Wall -Wextra -g -march=x86-64 -mtune=generic 
 LFLAGS =
 
 ifeq ($(OS),Windows_NT)
