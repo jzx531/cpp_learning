@@ -2,6 +2,7 @@
 #include "memory_pool.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 memory_pool* memory_pool::createPool(size_t capacity)
 {
@@ -81,11 +82,75 @@ char* memory_pool::createNewSmallBlock(memory_pool* pool,size_t size)
 }
 
 //分配大块内存
-char* memory_pool::mallocBigBlock(memory_pool * poll,size_t size)
+char* memory_pool::mallocBigBlock(memory_pool * pool,size_t size)
 {
     void * temp = malloc(size);
-    memeset(temp,0,size);
+    memset(temp,0,size);
+
+    big_block * bbp = pool->big_block_start;
+    int i = 0;
+    while(bbp){
+        if(bbp->big_buffer == nullptr){
+            bbp->big_buffer =(char*)temp;
+            return bbp->big_buffer;
+        }
+        if (i>3)
+        {
+            //三次找不到能用的bigblock
+            break;
+        }
+        bbp = bbp->next_block;
+        ++i;
+        
+    }
+    //-创建新的big_block，这里比较难懂的点，就是Nginx觉得big_block的buffer虽然是一个随机地址的大内存
+    //-但是big_block本身算一个小内存，那就不应该还是用随机地址，应该保存在内存池内部的空间。
+    //-所以这里有个套娃的内存池malloc操作
+    big_block* new_bbp = (big_block*)memory_pool::poolMalloc(pool,sizeof(big_block));
+    //-初始化
+    new_bbp -> big_buffer = (char*)temp;
+    new_bbp ->next_block = pool->big_block_start;
+    pool -> big_block_start = new_bbp;
+
+    //-返回分配内存的首地址
+    return new_bbp->big_buffer;
     
+}
+
+void memory_pool::freeBigBlock(memory_pool*pool,char *buffer_ptr)
+{
+    big_block* bbp = pool->big_block_start;
+    while(bbp){
+        if(bbp->big_buffer == buffer_ptr){
+            free(bbp->big_buffer);
+            bbp->big_buffer =nullptr;
+            return;
+        }
+        bbp = bbp->next_block;
+    }
+}
+
+void memory_pool::destroyPool(memory_pool * pool)
+{
+    //销毁大内存
+    big_block* bbp = pool->big_block_start;
+    while(bbp){
+        if(bbp->big_buffer){
+            free(bbp->big_buffer);
+            delete bbp->big_buffer;
+        }
+        bbp = bbp->next_block;
+    }
+
+    //释放小内存
+    small_block * temp = pool->small_block_start->next_block;
+    while(temp){
+        small_block *next = temp->next_block;
+        free(temp);
+        temp = next;
+    }
+    delete temp;
+    free(pool);
 }
 
 

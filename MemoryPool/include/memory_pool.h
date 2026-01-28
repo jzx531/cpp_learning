@@ -18,8 +18,8 @@ class memory_pool{
         static memory_pool * createPool(size_t capacity);
         static void destroyPool(memory_pool * pool);
         static char * createNewSmallBlock(memory_pool * pool,size_t size);
-        static void freeBigBlock(memory_pool *pool,char* buffer_ptr);
-        static void * poolMalloc(memeory_pool *pool,size_t size);
+        static char* mallocBigBlock(memory_pool * pool,size_t size);
+        static void * poolMalloc(memory_pool *pool,size_t size);
         static void freeBigBlock(memory_pool * pool, char *buffer_ptr);
 
 };

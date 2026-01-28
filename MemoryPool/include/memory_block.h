@@ -11,7 +11,7 @@ class small_block{
 
 class big_block{
     public:
-        char * buffer;
+        char * big_buffer;
         big_block * next_block;
 };
 
