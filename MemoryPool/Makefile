@@ -34,7 +34,7 @@ OUTPUT  := output
 # Include / Lib flags
 # =========================
 INCLUDES := -I$(INCLUDE)
-LIBS := -L$(LIB) -lpthread -lws2_32
+LIBS := -L$(LIB) -lpthread #-lws2_32
 
 # =========================
 # Sources / Objects
