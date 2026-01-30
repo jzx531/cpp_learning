@@ -19,12 +19,12 @@ int main() {
     if (mysql_real_connect(
             conn,
             nullptr,        // host: 使用 Unix socket（localhost）
-            "root",         // user
-            "",             // password: auth_socket 不需要密码
+            "appuser",         // user
+            "app123",             // password: auth_socket 不需要密码
             "mydb",         // ✅ 指定数据库名！
             0,              // port: 0 表示默认（socket 模式忽略）
             nullptr,        // unix_socket: 默认路径
-            0               // client_flag
+            CLIENT_MULTI_STATEMENTS               // client_flag
         ) == nullptr) {
 
         std::cerr << "❌ Connection failed: " << mysql_error(conn) << std::endl;

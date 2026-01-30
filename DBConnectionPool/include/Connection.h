@@ -12,7 +12,8 @@ struct DBConfig{
     std::string user;
     std::string password;
     std::string dbname;
-    int charset;
+    // int charset;
+    std::string charset;
 };
 
 class Connection{
@@ -42,9 +43,13 @@ class Connection{
 
         void reset();
 
+        bool isAlive();
+
         std::string getError() const;
 
         uint64_t getLastActiveTime() const;
+
+        MYSQL * getMysql();
 
 };
 

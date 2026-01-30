@@ -34,7 +34,7 @@ class ConnectionPool
         std::condition_variable cond_var_;
         std::thread maintenance_thread_;
         std::atomic<bool> is_running_{false};
-        
+
     public:
         //单例模式
         static ConnectionPool& getInstance();
@@ -62,7 +62,11 @@ class ConnectionPool
         void startMaintenanceThread();
         //清理所有连接
         void clearConnections();
-};
+
+        // 动态调整配置
+        void updateConfig(const PoolConfig& new_config);
+        
+};       
 
 
 #endif

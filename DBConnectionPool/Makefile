@@ -68,8 +68,8 @@ $(BUILD)/%.o: $(SRC)/%.cpp
 .PHONY: clean run
 
 clean:
-	$(RM) $(call FIXPATH,$(BUILD)\*.o)
-	$(RM) $(call FIXPATH,$(BUILD)\*.d)
+	$(RM) $(call FIXPATH,$(BUILD)/*.o)
+	$(RM) $(call FIXPATH,$(BUILD)/*.d)
 	$(RM) $(call FIXPATH,$(TARGET))
 	@echo Clean complete
 
