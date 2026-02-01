@@ -1,72 +1,91 @@
-# =========================
-# Compiler
-# =========================
+#
+# 'make'        build executable file 'main'
+# 'make clean'  removes all .o, .d and executable files
+#
+
+# define the Cpp compiler to use
 CXX = g++
 
-CXXFLAGS := -std=c++17 -Wall -Wextra -g -march=x86-64 -mtune=generic
+# define any compile-time flags
+CXXFLAGS := -std=c++17 -Wall -Wextra -g 
+
+# define linker flags
 LFLAGS =
 
-# =========================
-# SDL flags
-# =========================
-SDL_CFLAGS := $(shell sdl-config --cflags)
-SDL_LIBS   := $(shell sdl-config --libs)
-
-# =========================
-# Directories
-# =========================
+# define directories
+OUTPUT  := output
 SRC     := src
 INCLUDE := include
 LIB     := lib
 BUILD   := build
-OUTPUT  := output
 
-# =========================
-# Include / Lib flags
-# =========================
-INCLUDES := -I$(INCLUDE) $(SDL_CFLAGS)
+# OS-specific settings
+ifeq ($(OS),Windows_NT)
+SHELL = cmd.exe
+MAIN    := main.exe
+SOURCEDIRS  := $(SRC)
+INCLUDEDIRS := $(INCLUDE)
+LIBDIRS     := $(LIB) 
+FIXPATH = $(subst /,\,$1)
+RM      := del /q /f
+MD      := mkdir
+else
+MAIN    := main
+SOURCEDIRS  := $(shell find $(SRC) -type d)
+INCLUDEDIRS := $(shell find $(INCLUDE) -type d)
+LIBDIRS     := $(shell find $(LIB) -type d)
+FIXPATH = $1
+RM = rm -f
+MD := mkdir -p
+endif
 
-LIBS := \
-	-lncurses \
-	-lSDL_mixer \
-	$(SDL_LIBS) \
-	-lpthread \
+# include flags
+INCLUDES := $(patsubst %,-I%, $(INCLUDEDIRS:%/=%))
 
+# library flags
+# LIBS := $(patsubst %,-L%, $(LIBDIRS:%/=%))
+LIBS := -L$(LIB)  -lpdcurses -luser32 -lgdi32
+# source files
+SOURCES := $(wildcard $(patsubst %,%/*.cpp, $(SOURCEDIRS)))
 
-# =========================
-# Sources / Objects
-# =========================
-SOURCES := $(wildcard $(SRC)/*.cpp)
-OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD)/%.o,$(SOURCES))
+# object and dependency files in BUILD directory
+OBJECTS := $(SOURCES:$(SRC)/%.cpp=$(BUILD)/%.o)
 DEPS    := $(OBJECTS:.o=.d)
 
-TARGET := $(OUTPUT)/main
+# final executable path
+OUTPUTMAIN := $(call FIXPATH,$(OUTPUT)/$(MAIN))
 
-# =========================
-# Rules
-# =========================
-all: $(BUILD) $(OUTPUT) $(TARGET)
-	@echo Build complete
+# default target
+all: $(OUTPUT) $(OUTPUTMAIN)
+	@echo Executing 'all' complete!
 
-$(BUILD):
-	mkdir -p $(BUILD)
-
+# create output directory
 $(OUTPUT):
-	mkdir -p $(OUTPUT)
+	$(MD) $(OUTPUT)
 
-$(TARGET): $(OBJECTS)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $^ $(LFLAGS) $(LIBS)
+# create build directory (needed before compiling objects)
+$(BUILD):
+	$(MD) $(BUILD)
 
+# link executable
+$(OUTPUTMAIN): $(BUILD) $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $(OBJECTS) $(LFLAGS) $(LIBS)
+
+# compile .cpp -> .o in build/ directory
 $(BUILD)/%.o: $(SRC)/%.cpp
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -MP -c $< -o $@
 
+# include dependencies
 -include $(DEPS)
 
 .PHONY: clean run
 
 clean:
-	rm -f $(BUILD)/*.o $(BUILD)/*.d $(TARGET)
-	@echo Clean complete
+	-$(RM) $(OUTPUTMAIN)
+	-$(RM) $(call FIXPATH,$(OBJECTS))
+	-$(RM) $(call FIXPATH,$(DEPS))
+	@echo Cleanup complete!
 
 run: all
-	./$(TARGET)
+	./$(OUTPUTMAIN)
+	@echo Executing 'run: all' complete!
