@@ -22,8 +22,8 @@ namespace LOG
 {
     struct LogMsg
     {
-        time_t time;//日志输出时间
-        Loglevel::value _level;//日志等级
+        time_t _time;//日志输出时间
+        LogLevel::value _level;//日志等级
         std::string _file;//源文件名称
         size_t _line;//源代码行号
         std::thread::id _tid;//线程ID
@@ -36,7 +36,7 @@ namespace LOG
             const std::string logger,
             const std::string msg
         ) : 
-        _ctime(util::Date::getTime()),
+        _time(util::Date::getTime()),
         _level(level),
         _line(line),
         _tid(std::this_thread::get_id()), // get_id 获取当前线程的ID
