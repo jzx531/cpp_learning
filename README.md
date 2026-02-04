@@ -124,8 +124,116 @@ Result calculate() {
 
 ## 任务调度
 
+与传统的线程调度方式相比，协程调度具有以下优势：​
+
+* 开销极低：线程上下文切换需要保存和恢复大量的 CPU 寄存器、栈指针等信息，涉及内核态和用户态的切换，开销较大 。而协程上下文切换只需要保存和恢复少量的寄存器信息，并且完全在用户态进行，开销通常在纳秒级别，远远小于线程上下文切换的开销 。​
+* 高并发处理能力：线程数量过多时，会消耗大量的系统资源，如内存、CPU 时间等，导致上下文切换频繁，系统性能下降 。而协程非常轻量级，可以在单个线程中创建大量的实例，实现高并发任务处理，不会像线程那样受到系统资源的限制 。​
+* 编程模型简洁：使用协程进行任务调度，可以使代码逻辑更加清晰，以同步的方式编写异步任务，避免了复杂的回调函数嵌套和状态管理，提高了代码的可读性和可维护性 。​
 
 
+Scheduler类实现了一个简单的任务调度器 。addTask方法用于将任务添加到任务队列中，run方法负责调度任务的执行 。​
+在run方法中，首先依次启动所有任务，使它们开始执行到第一个co_await处暂停 。然后再次遍历任务队列，恢复那些尚未完成的任务继续执行 。
+
+```c++
+#include <iostream>
+#include <coroutine>
+#include <vector>
+
+struct Task {
+    // 1. 定义 promise_type
+    struct promise_type {
+        // 2. get_return_object 必须返回一个持有当前协程句柄的 Task
+        Task get_return_object() noexcept {
+            return Task{ std::coroutine_handle<promise_type>::from_promise(*this) };
+        }
+        std::suspend_always initial_suspend() noexcept { return {}; }
+        std::suspend_always final_suspend() noexcept { return {}; }
+        void return_void() noexcept {}
+        void unhandled_exception() noexcept {}
+    };
+
+    // 3. Task 必须持有协程句柄
+    std::coroutine_handle<promise_type> handle;
+
+    // 4. 构造函数：接收句柄
+    explicit Task(std::coroutine_handle<promise_type> h) : handle(h) {}
+
+    // 5. 提供 resume 接口
+    void resume() {
+        if (handle && !handle.done()) {
+            handle.resume();
+        }
+    }
+
+    // 6. （可选）析构时销毁协程
+    ~Task() {
+        if (handle) {
+            handle.destroy();
+        }
+    }
+
+    // 禁用拷贝（协程句柄不可拷贝）
+    Task(const Task&) = delete;
+    Task& operator=(const Task&) = delete;
+
+    // 允许移动（如果需要放入 vector）
+    Task(Task&& other) noexcept : handle(other.handle) {
+        other.handle = nullptr;
+    }
+    Task& operator=(Task&& other) noexcept {
+        if (this != &other) {
+            if (handle) handle.destroy();
+            handle = other.handle;
+            other.handle = nullptr;
+        }
+        return *this;
+    }
+};
+
+// 协程函数
+Task task1() {
+    std::cout << "Task 1 is running" << std::endl;
+    co_await std::suspend_always{};
+    std::cout << "Task 1 resumed" << std::endl;
+}
+
+Task task2() {
+    std::cout << "Task 2 is running" << std::endl;
+    co_await std::suspend_always{};
+    std::cout << "Task 2 resumed" << std::endl;
+}
+
+class Scheduler {
+public:
+    void addTask(Task task) {
+        tasks.push_back(std::move(task)); // 需要移动语义
+    }
+
+    void run() {
+        // 第一次 resume：启动协程，执行到第一个 co_await
+        for (auto& task : tasks) {
+            task.resume();
+        }
+        // 第二次 resume：从 co_await 恢复，执行剩余部分
+        for (auto& task : tasks) {
+            if (!task.handle.done()) {
+                task.resume();
+            }
+        }
+    }
+
+private:
+    std::vector<Task> tasks; // 需要 Task 支持移动
+};
+
+int main() {
+    Scheduler scheduler;
+    scheduler.addTask(task1());
+    scheduler.addTask(task2());
+    scheduler.run();
+    return 0;
+}
+```
 
 
 
