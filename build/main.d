@@ -1,1 +1,1 @@
-build/main.o: src/main.cpp
+build/main.o: src/main.cpp include/lockFreeQueue.hpp
