@@ -3,9 +3,11 @@
 # make clean  : remove build and output files
 #
 
-CXX = g++
+CXX = gcc
 
-CXXFLAGS := -std=c++20 -Wall -Wextra -g -march=x86-64 -mtune=generic  -fcoroutines
+# CXXFLAGS := -std=c++20 -Wall -Wextra -g -march=x86-64 -mtune=generic  -fcoroutines
+CXXFLAGS := -Wall -ggdb -W -O
+
 LFLAGS =
 
 ifeq ($(OS),Windows_NT)
@@ -25,7 +27,7 @@ endif
 # Directories
 # =========================
 SRC     := src
-INCLUDE := include
+INCLUDE := include 
 LIB     := lib
 BUILD   := build
 OUTPUT  := output
@@ -33,14 +35,14 @@ OUTPUT  := output
 # =========================
 # Include / Lib flags
 # =========================
-INCLUDES := -I$(INCLUDE)
-LIBS := -L$(LIB) -lpthread 
+INCLUDES := -I$(INCLUDE) -I/usr/include/tirpc
+LIBS := -L$(LIB) -lpthread -ltirpc
 
 # =========================
 # Sources / Objects
 # =========================
-SOURCES := $(wildcard $(SRC)/*.cpp)
-OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD)/%.o,$(SOURCES))
+SOURCES := $(wildcard $(SRC)/*.c)
+OBJECTS := $(patsubst $(SRC)/%.c,$(BUILD)/%.o,$(SOURCES))
 DEPS    := $(OBJECTS:.o=.d)
 
 TARGET := $(call FIXPATH,$(OUTPUT)/$(MAIN))
@@ -60,7 +62,7 @@ $(OUTPUT):
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $^ $(LFLAGS) $(LIBS)
 
-$(BUILD)/%.o: $(SRC)/%.cpp
+$(BUILD)/%.o: $(SRC)/%.c
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -c $< -o $@
 
 -include $(DEPS)
