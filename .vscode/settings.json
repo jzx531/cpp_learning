@@ -8,6 +8,7 @@
         "ws2tcpip.h": "c",
         "string.h": "c",
         "time.h": "c",
-        "conio.h": "c"
+        "conio.h": "c",
+        "stat.h": "c"
     }
 }

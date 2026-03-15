@@ -35,9 +35,8 @@ OUTPUT  := output
 # =========================
 # Include / Lib flags
 # =========================
-INCLUDES := -I$(INCLUDE) -I/usr/include/tirpc
-LIBS := -L$(LIB) -lpthread -ltirpc
-
+INCLUDES := -I$(INCLUDE) 
+LIBS := -L$(LIB) -lpthread -lws2_32
 # =========================
 # Sources / Objects
 # =========================
