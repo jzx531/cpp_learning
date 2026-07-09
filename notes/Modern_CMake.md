@@ -302,3 +302,152 @@ cmake --workflow --preset <name>
 
 为了生产高质量的代码并维护其质量，自动化测试是非常重要的。CMake 套件包含了一个用于此目的的命令行工具 CTest，旨在标准化测试的执行和报告方式。作为 CMake 用户，不需要了解特定项目测试的详细信息：使用了哪个框架或如何运行。CTest 提供了一个方便的接口来列出、过滤、随机化、重试和限制测试运行的时间
 
+## CMake 语言
+
+以下是与 message() 命令一起使用此类参数的示例，该命令将所有传递的参数输出到屏幕上：
+
+```sh
+message([[multiline
+ bracket
+ argument ]])
+ message([==[
+ because we used two equal-signs "=="
+ this command receives only a single argument
+ even if it includes two square brackets in a row
+ { "petsArray" = [["mouse","cat"],["dog"]] }
+ ]==])
+```
+
+使用变量
+
+```cmake
+set(myVar "Hello, World!")
+message("The value of myVar is: ${myVar}")
+```
+
+变量引用在变量类别方面的工作方式:
+
+* ${} 语法用于引用普通变量或缓存变量
+* $ENV{}用于引用环境变量
+* $CACHE{}用于引用缓存变量
+
+文件变量作用域通过block() 和 function() 命令展开并通过endblock() 和 endfunction() 命令结束
+
+列表
+
+```cmake
+set(myList "a;list;of;five;elements")
+set(myList a list "of;five;elements")
+```
+
+list 子命令摘要:
+```cmake 
+list(LENGTH <list> <out-var>)
+list(GET <list> <element index> [<index> ...] <out-var>)
+list(JOIN <list> <glue> <out-var>)
+list(SUBLIST <list> <begin> <length> <out-var>)
+list(FIND <list> <value> <out-var>)
+list(APPEND <list> [<element>...])
+list(FILTER <list> {INCLUDE | EXCLUDE} REGEX <regex>)
+list(INSERT <list> <index> [<element>...])
+list(POP_BACK <list> [<out-var>...])
+list(POP_FRONT <list> [<out-var>...])
+list(PREPEND <list> [<element>...])
+list(REMOVE_ITEM <list> <value>...)
+list(REMOVE_AT <list> <index>...)
+list(REMOVE_DUPLICATES <list>)
+list(TRANSFORM <list> <ACTION> [...])
+list(REVERSE <list>)
+list(SORT <list> [...])
+```
+
+### 控制结构
+
+条件块:
+
+```cmake 
+if(<condition>)
+<commands>
+elseif(<condition>) # optional block, can be repeated
+<commands>
+else() # optional block
+<commands>
+endif()
+
+<!-- 嵌套条件 -->
+(<condition>) AND (<condition> OR (<condition>))
+```
+
+```cmake
+set(BAZ FALSE)
+set(QUX "BAZ")
+if(${QUX})
+```
+这里先求值变量后发现是一个已经识别的变量,进而解析为了一个包含五个字符的字符串FALSE 进而解析为假
+
+
+CMake 只有在以下情况下，才会将
+if(FOO) 计算为假：
+• OFF, NO, FALSE, N, IGNORE 或 NOTFOUND
+• 以-NOTFOUND 结尾的字符串
+• 空字符串
+• 零
+
+简单地判断一个未定义的变量，将为假：
+1 if (CORGE)
+当变量事先定义后，情况就改变了，条件计算为真：
+1 set(CORGE "A VALUE")
+2 if (CORGE)
+
+比较值
+支持以下操作符进行比较操作：
+EQUAL, LESS, LESS_EQUAL, GREATER 和 GREATER_EQUAL
+其他语言中常见的比较操作符，在 CMake 中不起作用。
+它们可以用来比较数值：
+```cmake
+if(${FOO} EQUAL 1)
+```
+
+还可以检查以下内容：
+• 值是否在列表中：<VARIABLE|STRING> IN_LIST <VARIABLE>
+• 此版本的 CMake 中是否可以调用某个命令：COMMAND <command-name>
+• 是否存在一个 CMake 策略：POLICY <policy-id>
+• 是否使用 add_test() 添加了 CTest 测试：TEST <test-name>
+• 是否定义了一个构建目标：TARGET <target-name>
+
+
+• EXISTS <path-to-file-or-directory>: 检查文件或目录是否存在。
+也会符号链接进行解析（如果符号链接的目标存在，则返回真）。
+• <file1> IS_NEWER_THAN <file2>: 检查哪个文件修改时间更晚。
+如果文件 1 比文件 2 修改时间更晚（或等于）或者两个文件中有一个不存在，则返回真。
+• IS_DIRECTORY <path-to-directory>: 检查路径是否为目录。
+• IS_SYMLINK <file-name>: 检查路径是否为符号链接。
+• IS_ABSOLUTE <path>: 检查路径是否为绝对路径。
+
+使用 while() 循环或 foreach() 循环，来重复执行同一
+组命令。这两个命令都支持循环控制机制：
+• break() 循环将停止执行剩余的块，并跳出包围的循环。
+• continue() 循环将停止当前迭代的执行，并从下一个迭代的开头开始。
+
+
+```cmake
+ while(<condition>)
+ <commands>
+endwhile()
+```
+
+foreach()
+foreach() 块有几种变体，为给定列表中的每个值执行封闭的命令。像其他块一样，有打开
+和关闭命令：foreach() 和 endforeach()。
+foreach() 的最简单形式类似 C++ 的 for 循环：
+```cmake
+foreach(<variable> <list>)
+<commands>
+endforeach()
+```
+
+CMake 将从 0 迭代到 <max>（包括）。如果需要更多控制，可以使用第二个变体，提供
+<min>，<max>，以及可选的 <step>。所有参数都必须是非负整数，且 <min> 必须小于 <max>：
+```cmake
+foreach(<loop_var> RANGE <min> <max> [<step>])
+```
