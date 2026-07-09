@@ -294,3 +294,11 @@ cmake -E <command> [<options>]
 cmake ––workflow --list-presets
 ```
 
+可以执行一个工作流预设：
+
+```sh
+cmake --workflow --preset <name>
+```
+
+为了生产高质量的代码并维护其质量，自动化测试是非常重要的。CMake 套件包含了一个用于此目的的命令行工具 CTest，旨在标准化测试的执行和报告方式。作为 CMake 用户，不需要了解特定项目测试的详细信息：使用了哪个框架或如何运行。CTest 提供了一个方便的接口来列出、过滤、随机化、重试和限制测试运行的时间
+
