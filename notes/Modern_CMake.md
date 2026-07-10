@@ -451,3 +451,259 @@ CMake 将从 0 迭代到 <max>（包括）。如果需要更多控制，可以�
 ```cmake
 foreach(<loop_var> RANGE <min> <max> [<step>])
 ```
+
+当 foreach() 处理列表时，才是彰显特色的时候：\
+```cmake
+foreach(<loop_variable> IN [LISTS <lists>] [ITEMS <items>])
+```
+
+```cmake
+set(L1 "one;two;three;four")
+ set(L2 "1;2;3;4;5")
+ foreach(num IN ZIP_LISTS L1 L2)
+ message("word=${num_0}, num=${num_1}")
+ endforeach()
+```
+
+### 自定义命令
+
+macro() 查找替换命令,function()进行函数调用
+宏中调用return()将返回比使用点各更高一层的调用语句已经在顶层作用域中可能会终止执行
+
+CMake 提供了以下变量来访问与调用相关的参数值：
+• ${ARGC}: 参数计数
+• ${ARGV}: 参数列表 (所有参数)
+• ${ARGV<index>}: 特定索引（从 0 开始）处的参数值
+• ${ARGN}: 调用者在最后一个参数后传递的匿名参数列表
+
+
+宏与其他块定义类似：
+```cmake
+macro(<name> [<argument>…])
+<commands>
+endmacro()
+```
+
+```cmake
+macro(MyMacro myVar)
+    set(myVar "new value")
+    message("argument: ${myVar}")
+endmacro()
+
+set(myVar "first value")
+message("myVar is now: ${myVar}")
+MyMacro("called value")
+message("myVar is now: ${myVar}")
+```
+
+```cmake
+function(<name> [<argument>…])
+    <commands>
+endfunction()
+```
+
+函数遵循调用堆栈的规则，允许使用 return() 命令返回到调用作用域。从 CMake 3.25开始，return() 命令允许一个可选的 PROPAGATE 关键字，后跟一系列变量名称。其目的与block() 命令类似——指定变量的值从局部作用域传递到调用作用域。
+
+```cmake
+function(MyFunction FirstArg)
+ message("Function: ${CMAKE_CURRENT_FUNCTION}")
+ message("File: ${CMAKE_CURRENT_FUNCTION_LIST_FILE}")
+ message("FirstArg: ${FirstArg}")
+ set(FirstArg "new value")
+ message("FirstArg again: ${FirstArg}")
+ message("ARGV0: ${ARGV0} ARGV1: ${ARGV1} ARGC: ${ARGC}")
+ endfunction()
+ set(FirstArg "first value")
+ MyFunction("Value1" "Value2")
+ message("FirstArg in global scope: ${FirstArg}")
+```
+
+运行结果如下
+```sh
+Function: MyFunction
+File: /root/examples/ch02/08-definitions/function.cmake
+FirstArg: Value1
+FirstArg again: new value
+ARGV0: Value1 ARGV1: Value2 ARGC: 2
+FirstArg in global scope: first value
+```
+
+解决多个函数声明结构难以阅读的方法:将命令移动到其他文件中,并在目录之间划分作用域, 还有一个简单而优雅的方法----在文件顶部声明一个入口点宏,并在文件末尾调用:
+
+```cmake
+macro(main)
+    first_step()
+    second_step()
+    third_step()
+endmacro()
+
+function(first_step)
+function(second_step)
+function(third_step)
+
+main()
+```
+
+关于命名约定
+
+message() 命令，将文本输出到标准输出，但其功能远不止于此。其有一个 MODE 参数，可
+以定义命令的行为，如下所示：message(<MODE> ”text to print”)。
+可用的 MODE 如下所示：
+• FATAL_ERROR: 停止处理和生成。
+• SEND_ERROR: 继续处理，但跳过生成。
+• WARNING: 继续处理。
+• AUTHOR_WARNING: 输出警告，但继续处理。
+• DEPRECATION: 如 果 启 用 了 CMAKE_ERROR_DEPRECATED 或
+CMAKE_WARN_DEPRECATED，则输出相应地信息。
+• NOTICE 或省略模式（默认）: 输出消息到 stderr，以吸引使用者的注意。
+• STATUS: 继续处理，推荐用于向用户显示的主要消息。
+• VERBOSE: 继续处理，应用于更详细的信息，通常不是非常必要。
+• DEBUG: 继续处理，应包含项目出现问题时，对处理问题有帮助的详细信息。
+• TRACE: 继续处理，建议在项目开发期间输出消息。通常，这类消息会在发布项目之前移除。
+
+```cmake
+message(FATAL_ERROR "stop processing")
+message("This won't be printed. ")
+```
+
+```cmake
+function(foo)
+    list(APPEND CMAKE_MESSAGE_CONTEXT "foo")
+    message("foo message")
+endfunction()
+
+list(APPEND CMAKE_MESSAGE_CONTEXT "top")
+message("Before foo")
+foo()
+message("After foo")
+```
+
+1. 首先，将 top 追加到上下文跟踪变量 CMAKE_MESSAGE_CONTEXT，然后打印最初的“Before ’foo’ ”，匹配的前缀 [top] 将添加到输出中。
+2. 接下来，进入 foo() 函数时，我们在属于该函数的列表后，追加一个名为 foo 的新上下文，并输出另一个消息，该消息在输出中显示扩展的 [top.foo] 前缀。
+3. 最后，在函数执行完成后，我们打印“After ’foo’”。消息以原始的 [foo] 作用域打印。
+为什么？因为变量作用域规则：更改的 CMAKE_MESSAGE_CONTEXT 变量只在函数作用域结束前有效，然后恢复为原始未更改的版本
+
+include 
+
+```cmake
+include(<file|module> [OPTIONAL] [RESULT_VARIABLE <var>])
+```
+
+如果提供一个文件名(带有.cmake 扩展名的路径),CMake 将尝试打开并执行
+如果文件不存在，CMake 将报错，除非使用 OPTIONAL 关键字指定相应文件为“可选的”。当需要知道 include() 是否成功时，可以提供 RESULT_VARIABLE 关键字以及变量的名称。在成功时，它的内容为文件的完整路径；在失败时，则为 NOTFOUND
+
+使用脚本模式下运行时，相对路径都将以当前工作目录解析相对路径。要强制相对于脚本本身进行搜索，请提供绝对路径：
+
+```cmake
+include("${CMAKE_CURRENT_LIST_DIR}/<filename>.cmake")
+```
+
+如果不提供路径，但提供了模块的名称（不带.cmake 或其他），CMake 将尝试找到一个模块
+并包含它。CMake 将在 CMAKE_MODULE_PATH 中搜索名为 < 模块 >.cmake 的文件，然后是
+在 CMake 模块目录中搜索。
+当 CMake 遍历源树，并包含了不同的列表文件时，将设置以下变量：
+• CMAKE_CURRENT_LIST_DIR
+• CMAKE_CURRENT_LIST_FILE
+• CMAKE_PARENT_LIST_FILE
+• CMAKE_CURRENT_LIST_LINE
+
+include_guard()
+
+对于有些文件，我们只希望包含一次，这时 include_guard([DIRECTORY|GLOBAL]) 就
+可以使用了。
+将 include_guard() 放在包含文件的顶部。当 CMake 第一次遇到它时，将在当前作用
+域中进行记录。如果文件再次包含，CMake 就不会再对该文件进行处理了。
+
+file()
+
+```cmake
+file(READ <filename> <out-var> [...])
+file({WRITE | APPEND} <filename> <content>...)
+file(DOWNLOAD <url> [<file>] [...])
+```
+
+使用execute_process() 来运行其他进程,并收集输出
+
+```cmake
+execute_process(COMMAND <cmd1> [<arguments>]... [OPTIONS])
+```
+
+可选地 TIMEOUT 参数，用来在进程未在所需限制内完成任务时终止该进程，并且可以根据需要设置 WORKING_DIRECTORY 。
+
+为了收集输出，CMake 提供了两个参数：OUTPUT_VARIABLE 和 ERROR_VARIABLE（用法类似）。如果想合并 stdout 和 stderr，请为这两个参数使用相同的变量。
+
+
+## 设置你的第一个CMake项目
+
+
+建议在 cmake_minimum_required() 之后立即放置 project() 命令，这样做将确保在配置项目时使用正确的策略。可以使用以下两种形式之一：
+```cmake
+project(<PROJECT-NAME> [<language-name>...])
+```
+
+或者
+
+```cmake
+project(<PROJECT-NAME>
+[VERSION <major>[.<minor>[.<patch>[.<tweak>]]]]
+[DESCRIPTION <project-description-string>]
+[HOMEPAGE_URL <url-string>]
+[LANGUAGES <language-name>...])
+```
+
+```cmake
+PROJECT_NAME
+CMAKE_PROJECT_NAME (only in the top-level CMakeLists.txt)
+PROJECT_IS_TOP_LEVEL, <PROJECT-NAME>_IS_TOP_LEVEL
+PROJECT_SOURCE_DIR, <PROJECT-NAME>_SOURCE_DIR
+PROJECT_BINARY_DIR, <PROJECT-NAME>_BINARY_DIR
+```
+
+```cmake
+  <!-- cars.cmake -->
+set(sources
+  cars/car.cpp
+  )
+
+  <!-- cmakelists.txt -->
+cmake_minimum_required(VERSION 3.10)
+project(MyProject)
+
+include(cars.cmake)
+add_executable(MyProject main.cpp   ${sources})
+```
+
+使用子目录管理作用域
+
+add_subdirectory() 将计算 source_dir 路径（相对于当前目录）并解析其中的
+CMakeLists.txt 文件。这个文件在目录作用域内解析，消除了前一种方法中提到的问题：
+• 变量隔离到嵌套作用域。
+• 嵌套工件可以独立配置。
+• 修改嵌套的 CMakeLists.txt 文件不需要重新构建不相关的目标。
+• 路径定位到目录，并且可以添加到父级包含路径。
+
+```cmake
+add_subdirectory(source_dir [binary_dir] [EXCLUDE_FROM_ALL])
+```
+
+subdirectory下的cmakelists.txt为
+```cmake
+cmake_minimum_required(VERSION 3.10)
+project(MyProject)
+add_executable(MyProject main.cpp)
+add_subdirectory(cars)
+target_link_libraries(MyProject cars)
+```
+
+嵌套的列表文件什么样;
+
+```cmake
+add_libary(cars OBJECT
+  car.cpp)
+target_include_directories(cars PUBLIC .)
+```
+
+在这个例子中,使用add_library()来生成一个全局可见的目标
+
+
+
