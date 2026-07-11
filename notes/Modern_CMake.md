@@ -1124,5 +1124,195 @@ CMake不会传播自定义属性,必须明确地将自定义属性添加到兼�
 • COMPATIBLE_INTERFACE_NUMBER_MAX
 • COMPATIBLE_INTERFACE_NUMBER_MIN
 
+将属性添加到它们中的任何一个，都会触发传播和兼容性检查
 
+BOOL列表将检查所有传递到目标的属性是否评估为相同的布尔值
+
+STRING 将评估为字符串。NUMBER_MAX 和 NUMBER_MIN 略有不同——传递的值不必匹配，但目标目标将只接收最高或最低值。
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(PropagatedProperties CXX)
+
+# 1. 创建 source1 库并设置版本及兼容性要求
+add_library(source1 empty.cpp)
+set_property(TARGET source1 PROPERTY INTERFACE_LIB_VERSION 4)
+set_property(TARGET source1 APPEND PROPERTY 
+    COMPATIBLE_INTERFACE_STRING LIB_VERSION)
+
+# 2. 创建 source2 库并设置版本
+add_library(source2 empty.cpp)
+set_property(TARGET source2 PROPERTY INTERFACE_LIB_VERSION 4)
+
+# 3. 创建目标库 destination 并链接上述两个库
+add_library(destination empty.cpp)
+target_link_libraries(destination source1 source2)
+```
+
+为了简化，所有目标都使用相同的空源文件。在两个源目标上，指定
+了带有 INTERFACE_前缀的自定义属性，并将其设置为相同的匹配库版本。两个源目标都链接到
+相应的目标。最后，我们在 source1 上指定了字符串兼容性，要求其作为属性（这里没有添加
+INTERFACE_前缀）
+
+识别伪目标
+
+不出现生成构建系统中的目标:
+
+* 导入的目标
+* 别名目标
+* 接口库
+
+导入的目标
+
+如果浏览了本书的目录,CMake如何管理外部依赖项_其他项目,库等
+IMPORTED目标是这个过程的产物
+
+别名目标的确切作用就是为目标创建一个不同的名称引用,可以为可执行文件和库创建别名目标
+
+```cmake
+add_executable(<name> ALIAS <target>)
+add_library(<name> ALIAS <target>)
+```
+
+别名目标的属性只读,不能安装或导出别名(在生成的构建系统中不可见)
+为什么还要有别名呢？有时，它们非常有用，比如项目的一部分（如子目录）需要以特定名称
+引用一个目标，而实际的实现可能因情况而异。例如，希望根据用户的选择构建解决方案中的库或
+导入它。
+
+接口库
+
+接口库主要有两个用途——包含头文件的库以及将一堆传播属性打包成一个逻辑单元
+
+```cmake
+add_library(Eigen INTERFACE src/eigen.h src/vector.h src/matrix.h)
+
+target_include_directories(Eigen INTERFACE 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:include/Eigen>
+)
+```
+
+INTERFACE 关键字：这是最关键的部分。它告诉 CMake，Eigen 这个目标不会生成任何二进制文件（如 .lib, .so, .dll 或 .a）。它仅仅是一个“属性容器”或“逻辑分组”。
+作用：它允许你将一组头文件打包成一个逻辑单元。其他目标只需链接 Eigen，就能自动获得这些头文件的引用关系（尽管对于纯头文件库，这里的文件名列表主要起文档作用，实际编译依赖靠下面的 target_include_directories）。
+适用场景：这通常用于像 Eigen、fmt (header-only mode) 这样的纯头文件库。
+
+后两行是：
+这一行定义了当其他目标链接 Eigen 时，编译器应该去哪里寻找头文件。这里使用了 生成器表达式 来处理“构建时”和“安装后”两种不同的路径环境：
+
+在前面的代码片段中,创建一个包含三个头的Eigen接口库
+
+要使用这样的库,只需要链接它即可
+
+```cmake
+target_link_libraries(executable Eigen)
+```
+
+第二种场景使用了相同的机制,但出于不同的目的——创建了一个逻辑目标
+作为一个传播属性的占位符
+
+然后,将这个目标做其他目标的依赖,并以干净,方便的方式设置属性
+
+```cmake
+add_library(warning_properties INTERFACE)
+target_compile_options(waring_properties INTERFACE -wall -Wextra -Wpedantic)
+target_link_libraries(executable warning_properties)
+```
+
+add_library(INTERFACE) 命令创建了一个逻辑的 warning_properties 目标，用于
+在第二个命令中为可执行目标设置编译选项。我建议使用这些 INTERFACE 目标，它们可以提高
+代码的可读性和可重用性，这是将一堆魔法值重构为命名良好的变量的过程。我还建议明确地为接
+口库添加一个后缀，如_properties，以便轻松区分接口库和常规库。
+
+对象库
+
+对象库用于将多个源文件,组合成一个单一的逻辑目标，并在构建过程中将它们编译成.o对象文件
+
+要创建一个对象库,遵循与创建其他库相同的方法,但使用OBJECT关键字:
+
+```cmake
+add_library(<target> OBJECT <sources>)
+```
+
+构建过程中产生的对象文件可以作为其他目标的编译元素,使 用
+$<TARGET_OBJECTS:objlib> 生成器表达式：
+
+```cmake
+add_library(... $<TARGET_OBJECTS:objlib> ...)
+add_executable(... $<TARGET_OBJECTS:objlib> ...)
+```
+
+或者，可以使用 target_link_libraries() 命令将它们作为依赖项进行添加。
+在 Calc 库的上下文中，对象库将非常有用，以避免为库的静态和共享版本编译库源的冗余。
+对于共享库，明确地编译具有 POSITION_INDEPENDENT_CODE 启用的对象文件是必要的。
+回到项目的目标：calc_obj 将提供编译后的对象文件，然后将用于 calc_static 和
+calc_shared 库。让我们探索这两种类型库之间的实际区别，并理解为什么可能需要创建两者。
+伪目标是否穷尽了目标的概念？当然不是！我们仍然需要了解，这些目标是如何用于生成构建
+系统的
+
+构建目标
+
+CMake 默认生成为包含所有顶级列表文件目标的目标
+如可执行文件和库(不一定是自定义目标) 当运行cmake --build<build>
+
+一些可执行文件或库可能不需要在每次构建中都存在,
+
+```cmake
+add_executable(<name> EXCLUDE_FROM_ALL [<source>...])
+add_library(<name> EXCLUDE_FROM_ALL [<source>...])
+```
+
+自定义目标则相反——默认情况下，它们排除在 ALL 目标之外，除非明确地使用 ALL 关键
+字添加它们
+
+### 编写自定义命令
+
+使用自定义目标有一个缺点——将它们添加到 ALL 目标或者依赖它们来构建其他目标，每次
+都会构建。有时候，这正是想要的，但需要自定义行为来生成不应该无故重新创建的文件：
+
+* 生成另一个目标所依赖的源代码文件
+* 将另一种语言翻译成c++
+* 在另一个目标构建之前或之后,立即执行自定义操作
+
+```cmake
+add_custom_command(OUTPUT output1 [output2 ...]
+COMMAND command1 [ARGS] [args1...]
+[COMMAND command2 [ARGS] [args2...] ...]
+[MAIN_DEPENDENCY depend]
+[DEPENDS [depends...]]
+[BYPRODUCTS [files...]]
+[IMPLICIT_DEPENDS <lang1> depend1
+[<lang2> depend2] ...]
+[WORKING_DIRECTORY dir]
+[COMMENT comment]
+[DEPFILE depfile]
+[JOB_POOL job_pool]
+[VERBATIM] [APPEND] [USES_TERMINAL]
+[COMMAND_EXPAND_LISTS])
+```
+
+自定义命令并不创建逻辑目标，但与自定义目标一样，必须添加到依赖关系图中。有两种方
+法可以实现——将其输出工件作为可执行文件（或库）的源，或者显式地将其添加到自定义目标的
+DEPENDS 列表中。
+
+将自定义命令用作生成器
+
+```cmake
+message Person{
+    required string name = 1;
+    required int32 id = 2;
+    optional string email =3;
+}
+```
+
+现在，假设编译器的 protoc 命令位于系统已知的某个位置，已经准备好了
+person.proto 文件，并且知道 Protobuf 编译器将输出 person.pb.h 和 person.pb.cc
+文件。以下是如何定义一个自定义命令来编译它们的例子：
+```cmake
+add_custom_command(OUTPUT person.pb.h person.pb.cc
+    COMMAND protoc --cpp_out=. person.proto
+    DEPENDS person.proto
+)
+
+add_executable(serializer serializer.cpp person.pb.cc)
+```
 
