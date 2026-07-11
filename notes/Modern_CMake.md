@@ -706,4 +706,423 @@ target_include_directories(cars PUBLIC .)
 在这个例子中,使用add_library()来生成一个全局可见的目标
 
 
+当使用target_link_libraries()时,main.cpp文件可以在不提供相对路径的情况下使用该头文件
+
+
+```mermaid
+graph LR
+    root["/"]
+
+    %% 顶层全局设置
+    root --> policies["CMake Policies"]
+    root --> settings["Project Settings"]
+    root --> g_vars["Global Variables"]
+    root --> g_includes["Global Includes"]
+    root --> g_deps["Global Dependencies"]
+
+    %% 主要目录分支
+    root --> src["src"]
+    root --> test["test"]
+
+    %% src 分支结构
+    src --> app1["app1"]
+    src --> app2["app2"]
+    src --> lib1["lib1"]
+    src --> lib2["lib2"]
+
+    %% src 子节点说明
+    app1 --- lib3_src["lib3"]
+    lib3_src -.-> note_lib3_static["Add lib3<br/>static library"]
+    
+    app1 -.-> note_app1_exe["Add app1 executable"]
+    app2 -.-> note_app2_exe["Add app2 executable"]
+    lib1 -.-> note_lib1_static["Add lib1 static library"]
+    lib2 -.-> note_lib2_dynamic["Add lib2 dynamic library"]
+
+    %% test 分支结构
+    test --> ctest["Configure CTest"]
+    test --> app1_test["app1"]
+    test --> app2_test["app2"]
+
+    %% test 子节点说明
+    app1_test --- lib3_test["lib3"]
+    
+    app1_test -.-> note_test_app1["Add app1 test targets"]
+    lib3_test -.-> note_test_lib3["Add lib3 test targets"]
+
+    app2_test --- lib1_test["lib1"]
+    app2_test --- lib2_test["lib2"]
+
+    app2_test -.-> note_test_app2["Add app2 test targets"]
+    lib1_test -.-> note_test_lib1["Add lib1 test targets"]
+    lib2_test -.-> note_test_lib2["Add lib2 test targets"]
+
+    %% 样式调整（可选，为了更像原图的灰色方块风格）
+    classDef box fill:#f0f0f0,stroke:#333,stroke-width:1px;
+    class root,src,test,app1,app2,lib1,lib2,app1_test,app2_test,lib3_src,lib3_test,lib1_test,lib2_test box;
+```
+
+1. 执行从项目的根开始——即源树顶层的 CMakeLists.txt 列表文件。该文件将设置所需的
+最低 CMake 版本和相应的策略，设置项目名称、支持的语言和全局变量，并包含 cmake
+目录中的文件，以便内容全局可用。
+2. 下一步是调用 add_subdirectory(src bin) 命令进入 src 目录的范围（希望将编译
+后的工件放在 <binary_tree>/bin，而不是/bin 中）。
+3. CMake 读取 src/CMakeLists.txt 文件，并发现其唯一目的是添加四个嵌套子目录：
+app1、app2、lib1 和 lib2。
+4. CMake 进 入 app1 的 变 量 范 围， 并 了 解 到 另 一 个 嵌 套 库 lib3， 它 有 自 己 的
+CMakeLists.txt 文件；然后进入 lib3 的范围，这是对目录结构的深度优先遍历。
+5. lib3 库添加了一个同名静态库目标，CMake 返回到 app1 的父范围。
+6. app1 子目录添加了一个依赖于 lib3 的可执行文件。CMake 返回到 src 的父范围。
+7. CMake 进入剩余的嵌套范围，并执行列表文件，直到所有 add_subdirectory() 调用完
+成。
+8. CMake 返回到顶层范围，并执行剩余的命令 add_subdirectory(test)。CMake 每次
+都会进入新的范围，并执行相应列表文件中的命令。
+9. 收集并检查所有目标的正确性。CMake 现在有了生成构建系统所需的所有信息。
+
+检测操作系统
+
+```cmake
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(STATUS "Doing things the usual way")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    message(STATUS "Thinking differently")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    message(STATUS "I'm supported here too.")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "AIX")
+    message(STATUS "I buy mainframes.")
+else()
+    message(STATUS "This is ${CMAKE_SYSTEM_NAME} speaking.")
+endif()
+```
+
+交叉编译是指在一个机器上编译代码在另一个目标平台上执行的过程
+
+无 论 配 置 如 何， 主 机 系 统 的 信 息 总 是 可 以 在 带 有 HOST 关 键 字 的 变 量 名 称 中 访 问：CMAKE_HOST_SYSTEM, CMAKE_HOST_SYSTEM_NAME, CMAKE_HOST_SYSTEM_PROCESSOR
+和 CMAKE_HOST_SYSTEM_VERSION。
+
+主机系统信息
+```cmake
+cmake_host_system_information(RESULT <VARIABLE> QUERY <KEY>...)
+```
+
+| 关键字 | 描述 |
+| :--- | :--- |
+| HOSTNAME | 主机名 |
+| FQDN | 完全限定域名 |
+| TOTAL_VIRTUAL_MEMORY | 以 MiB 为单位的虚拟内存总量 |
+| AVAILABLE_VIRTUAL_MEMORY | 以 MiB 为单位的可用虚拟内存 |
+| TOTAL_PHYSICAL_MEMORY | 以 MiB 为单位的总物理内存 |
+| AVAILABLE_PHYSICAL_MEMORY | 以 MiB 为单位的可用物理内存 |
+| OS_NAME | 如果存在，则输出 uname -s；<br>无论是 Windows、Linux，还是 Darwin |
+| OS_RELEASE | 操作系统子类型，如 Windows Professional |
+| OS_VERSION | 操作系统构建 ID |
+| OS_PLATFORM | 在 Windows 上和  $ ENV{PROCESSOR_ARCHITECTURE} 的值一样。在 Unix/macOS 上和 uname -m 一样 |
+
+
+| 关键字 | 描述 |
+| :--- | :--- |
+| NUMBER_OF_LOGICAL_CORES | 逻辑核数 |
+| NUMBER_OF_PHYSICAL_CORES | 物理核数 |
+| HAS_SERIAL_NUMBER | 如果处理器有序列号，则为 1 |
+| PROCESSOR_SERIAL_NUMBER | 处理器序列号 |
+| PROCESSOR_NAME | 可读的处理器名称 |
+| PROCESSOR_DESCRIPTION | 可读的完整处理器描述 |
+| IS_64BIT | 如果处理器是 64 位的为 1 |
+| HAS_FPU | 如果处理器有浮点单元为 1 |
+| HAS_MMX | 如果处理器支持 MMX 指令为 1 |
+| HAS_MMX_PLUS | 如果处理器支持 Ext. MMX 指令为 1 |
+| HAS_SSE | 如果处理器支持 SSE 指令为 1 |
+| HAS_SSE2 | 如果处理器支持 SSE2 指令为 1 |
+| HAS_SSE_FP | 如果处理器支持 SSE FP 指令为 1 |
+| HAS_SSE_MMX | 如果处理器支持 SSE MMX 指令为 1 |
+| HAS_AMD_3DNOW | 如果处理器支持 3DNow 指令为 1 |
+| HAS_AMD_3DNOW_PLUS | 如果处理器支持 3DNow+ 指令为 1 |
+| HAS_IA64 | 如果 IA64 处理器模拟 x86，则为 1 |
+
+设置C++标准
+
+```cmake
+set(CMAKE_CXX_STANDARD 17)
+```
+如果需要可以对每个目标进行重写：
+```cmake
+set_property(TARGET my_target PROPERTY CXX_STANDARD <version>)
+```
+或者
+```cmake
+set_target_properties(<targets> PROPERTIES CXX_STANDARD <version>)
+```
+
+```cmake
+set(CMAKE_CXX_EXTENSIONS OFF)
+```
+ 
+检查支持的编译器特性
+
+```cmake
+list(FIND CMAKE_CXX_COMPILE_FEATURES cxx_variable_templates result)
+if(result EQUAL -1)
+    message(STATUS "C++ variable templates are not supported")
+endif()
+```
+
+try_run() 命令会给予更多的自由，因为它可以确保代码不仅编译成功，而且执行也正确（可能想要测试正则表达式是否工作）。当然，这不会在交叉编译场景中工作（因为主机无法运行为不同目标构建的可执行文件），这个检查的目的是向用户提供快速反馈 (能正常编译)，所以它不是用来运行单元测试或任何复杂的东西——文件尽可能简单：
+
+```cmake
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+try_run(run_result compile_result
+        ${CMAKE_BINARY_DIR}/test_output
+        ${CMAKE_SOURCE_DIR}/main.cpp
+        RUN_OUTPUT_VARIABLE output)
+
+message("run_result: ${run_result}")
+message("compile_result: ${compile_result}")
+message("output:\n" "${output}")
+```
+
+## 与目标一起工作
+
+定义可执行目标的命令
+```cmake
+add_executable(<name> [WIN32] [MACOSX_BUNDLE]
+[EXCLUDE_FROM_ALL]
+[source1] [source2 ...])
+```
+
+定义库目标
+
+```cmake
+add_library(<name> [STATIC | SHARED | MODULE]
+[EXCLUDE_FROM_ALL]
+[<source>...])
+```
+
+自定义目标
+
+使用以下语法自定义目标
+• 计算其他二进制文件的校验和。
+• 运行代码消毒器并收集结果。
+• 将编译报告发送到指标通道。
+
+```cmake
+add_custom_target(Name [ALL] [COMMAND command2 [args2...] ...])
+```
+
+```mermaid
+graph TD
+    %% 定义子图以模拟图中的分组框
+    subgraph Layer1 [1]
+        direction TB
+        Calculations["Calculations<br/>library"]
+        Drawing["Drawing<br/>library"]
+    end
+
+    subgraph Layer2 [2]
+        direction TB
+        TerminalApp["TerminalApp<br/>executable"]
+        GuiApp["GuiApp<br/>executable"]
+    end
+
+    subgraph Layer3 [3]
+        Checksum["Checksum<br/>custom"]
+    end
+
+    %% 定义依赖关系箭头 (从下往上)
+    Checksum --> TerminalApp
+    Checksum --> GuiApp
+    
+    TerminalApp --> Calculations
+    GuiApp --> Calculations
+    GuiApp --> Drawing
+
+    %% 样式调整（可选，用于更接近原图视觉效果）
+    style Layer1 fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style Layer2 fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style Layer3 fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style Calculations fill:#e0e0e0,stroke:#333,stroke-width:1px
+    style Drawing fill:#e0e0e0,stroke:#333,stroke-width:1px
+    style TerminalApp fill:#e0e0e0,stroke:#333,stroke-width:1px
+    style GuiApp fill:#e0e0e0,stroke:#333,stroke-width:1px
+    style Checksum fill:#e0e0e0,stroke:#333,stroke-width:1px
+```
+这个项目有两个库，两个可执行文件和一个自定义目标。用例是提供一个带有 GUI 的银行应用程序（GuiApp），以及一个作为自动化脚本一部分使用的命令行版本（TerminalApp）。两个可执行文件都依赖于相同的 Calculations 库，但只有一个需要 Drawing 库。为了确保应用程序二进制文件的完整性，我们还将计算一个校验和，并通过单独的安全渠道分发它CMake 在编写此类解决方案的列表文件时非常灵活：
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(BankApp CXX)
+
+add_executable(terminal_app terminal_app.cpp)
+add_executable(gui_app gui_app.cpp)
+target_link_libraries(terminal_app calculations)
+target_link_libraries(gui_app calculations drawing)
+
+add_library(calculations calculation.cpp)
+
+add_library(drawing drawing.cpp)
+
+add_custom_target(checksum ALL
+        COMMAND sh -c "cksum terminal_app> terminal.ck"
+        COMMAND sh -c "cksum gui_app> gui.ck"
+        BYPRODUCTS terminal.ck gui.ck
+        COMMENT "Calculating checksums..."
+)
+```
+
+这段 CMake 代码定义了一个名为 **BankApp** 的项目，包含两个可执行程序、两个静态库以及一个用于生成校验和的自定义目标。以下是逐行解析：
+
+项目基础设置
+- `cmake_minimum_required(VERSION 3.26)`：指定构建该项目所需的最低 CMake 版本为 3.26。如果用户的 CMake 版本低于此，配置过程将报错停止。
+- `project(BankApp CXX)`：定义项目名称为 `BankApp`，并指定主要编程语言为 C++（`CXX`）。这会自动初始化一些与 C++ 相关的变量（如 `CMAKE_CXX_COMPILER`）。
+
+定义库
+虽然代码中先定义了可执行文件，但在逻辑上，库通常是作为依赖存在的。
+- `add_library(calculations calculation.cpp)`：创建一个名为 `calculations` 的库目标（默认为静态库），源文件为 `calculation.cpp`。这个库通常包含核心的业务逻辑或数学计算功能。
+- `add_library(drawing drawing.cpp)`：创建一个名为 `drawing` 的库目标，源文件为 `drawing.cpp`。这个库可能包含图形绘制或界面渲染相关的功能。
+
+定义可执行文件与链接
+- `add_executable(terminal_app terminal_app.cpp)`：定义一个名为 `terminal_app` 的可执行文件目标，由 `terminal_app.cpp` 编译而成。这是终端版本的入口程序。
+- `add_executable(gui_app gui_app.cpp)`：定义一个名为 `gui_app` 的可执行文件目标，由 `gui_app.cpp` 编译而成。这是图形用户界面版本的入口程序。
+- `target_link_libraries(terminal_app calculations)`：将 `terminal_app` 与 `calculations` 库链接。这意味着终端程序可以使用计算库中的函数。
+- `target_link_libraries(gui_app calculations drawing)`：将 `gui_app` 同时与 `calculations` 和 `drawing` 两个库链接。这意味着 GUI 程序既需要计算功能，也需要绘图功能。
+
+自定义构建步骤
+- `add_custom_target(checksum ALL ...)`：定义一个名为 `checksum` 的自定义目标。
+    - `ALL`：表示这个目标会被添加到默认构建目标中。也就是说，当你运行 `cmake --build .` 时，这个步骤也会自动执行，不需要单独调用 `make checksum`。
+    - `COMMAND sh -c "cksum terminal_app> terminal.ck"`：执行 shell 命令，对生成的 `terminal_app` 二进制文件进行校验和计算（使用 `cksum` 工具），并将结果重定向写入到 `terminal.ck` 文件中。
+    - `COMMAND sh -c "cksum gui_app> gui.ck"`：同上，对 `gui_app` 进行校验和计算并保存到 `gui.ck`。
+    - `BYPRODUCTS terminal.ck gui.ck`：告诉 CMake 这两个文件是该命令产生的产物。这有助于 CMake 正确处理增量构建（即如果源文件没变，就不需要重新计算校验和）。
+    - `COMMENT "Calculating checksums..."`：在构建过程中打印提示信息，让用户知道正在做什么。
+
+总结
+这是一个典型的 C++ 多目标项目结构：
+1. **分层架构**：将通用功能（计算、绘图）封装为库，将具体应用（终端、GUI）作为可执行文件，实现了代码复用。
+2. **自动化后处理**：利用 `add_custom_target` 在每次编译完成后自动检查二进制文件的完整性（通过校验和），这在软件发布或安全敏感的场景中很有用。
+
+前面的解决方案不能保证校验和目标会在可执行文件之后构建,CMake不知道校验和依赖于可执行二进制文件的存在,所以它可以自由地首先开始构建它
+```cmake
+add_dependencies(checksum terminal_app gui_app)
+```
+
+可视化依赖关系
+
+```cmake
+cmake --graphviz=test.dot .
+```
+
+该模块将生成一个文本文件，可以将其导入到 Graphviz 可视化软件中，该软件可以渲染图像或生成 PDF 或 SVG 文件，可以作为软件文档的一部分存储
+
+```cmake
+set(GRAPHVIZ_CUSTOM_TARGETS TRUE)
+```
+
+设置目标的属性:目标具有类似CPP对象字段的属性,其中一些属性为了修改而设计,而有些只是只读CMake定义了大量的"已知属性",这些属性取决于目标的类型,也可以添加自己的属性
+
+设置目标属性允许我们同时为多个目标指定多个属性
+
+
+```cmake
+get_target_property(<var> <target> <property-name>)
+set_target_properties(<target1> <target2> ...
+PROPERTIES <prop1-name> <value1>
+<prop2-name> <value2> ...)
+```
+属性的概念不仅适用于目标；CMake 支持为其他范围设置属性：GLOBAL、DIRECTORY、SOURCE、INSTALL、TEST 和 CACHE。 为 了 操 作 所 有 类 型 的 属 性， 有 通 用 的get_property() 和 set_property() 命令。在某些项目中，会看到这些低层命令用来精确地完成 set_target_properties() 命令所做的事情：
+
+```cmake
+set_property(TARGET <target> PROPERTY <name> <value>)
+```
+
+```cmake
+target_compile_definitions(<source> <INTERFACE|PUBLIC|PRIVATE> [items1...])
+```
+
+这个目标命令将填充一个 <source> 目标的 COMPILE_DEFINITIONS 属性。编译定义就是传递给编译器的-Dname=definition 标志，用于配置 C++ 预处理器定义这里有趣的部分是第二个参数，需要指定三个值中的一个，INTERFACE、PUBLIC 或
+PRIVATE，以控制属性应该传递给哪个目标。现在，不要将这些与 C++ 访问修饰符混淆——这是一个全新的概念。传播关键字的工作方式如下：
+• PRIVATE 设置源目标的属性。
+• INTERFACE 设置使用目标的目标属性。
+• PUBLIC 设置源目标和使用目标的目标属性。
+当属性不应传递给其他目标时，将其设置为 PRIVATE。当需要这样的传递时，选择 PUBLIC。如果处于一个源目标在其实现（.cpp 文件）中就不使用该属性，而在头文件中使用，并且这些属性传递给使用目标的目标，则应使用 INTERFACE 关键字。
+
+为 了 管 理 这 些 属 性，CMake 提 供 了 一 些 命 令， 例 如 之 前 提 到 的target_compile_definitions()。当指定 PRIVATE 或 PUBLIC 关键字时，CMake 将在目标的属性中存储提供的值，COMPILE_DEFINITIONS。此外，关键字是 INTERFACE 或 PUBLIC，将在具有 INTERFACE_前缀的属性中存储值——INTERFACE_COMPILE_DEFINITIONS。配置阶段，CMake 将读取源目标的接口属性，并将其内容附加到目标目标。就这样传播属性，或 CMake
+所说的传递目标的使用要求。
+
+PRIVATE（私有）：只有我自己用
+含义：这个宏定义只用于编译 LibA 自己的源文件（.cpp）。
+场景：你在 LibA.cpp 里写了 #ifdef SOME_MACRO，但在 LibA.h（公开头文件）里完全没提这个宏。
+结果：
+LibA 编译时：带有 -DSOME_MACRO。
+AppB 编译时：没有 -DSOME_MACRO。
+比喻：这是 LibA 的“内部机密”，AppB 不需要知道，也不应该知道。
+INTERFACE（接口）：只有别人用，我自己不用
+含义：这个宏定义不用于编译 LibA 的源文件，但任何链接了 LibA 的目标都必须拥有这个定义。
+场景：LibA.cpp 里根本没用到这个宏，但是 LibA.h（公开头文件）里写了 #ifdef SOME_MACRO。因为 AppB 会 #include "LibA.h"，所以 AppB 必须定义这个宏才能通过编译。
+结果：
+LibA 编译时：没有 -DSOME_MACRO。
+AppB 编译时：带有 -DSOME_MACRO。
+比喻：这是 LibA 给 AppB 的“使用说明书”或“入场券”。LibA 自己不需要这张票，但想用它的人必须有。
+PUBLIC（公开）：大家都要用
+含义：既用于编译 LibA，也传递给链接它的 AppB。它是 PRIVATE + INTERFACE 的结合体。
+场景：LibA.cpp 用到了这个宏，同时 LibA.h 也用到了这个宏。
+结果：
+LibA 编译时：带有 -DSOME_MACRO。
+AppB 编译时：带有 -DSOME_MACRO。
+比喻：这是“通用语言”。LibA 内部交流用它，跟 AppB 交流也用它。
+
+• COMPILE_DEFINITIONS
+• COMPILE_FEATURES
+• COMPILE_OPTIONS
+• INCLUDE_DIRECTORIES
+• LINK_DEPENDS
+• LINK_DIRECTORIES
+• LINK_LIBRARIES
+• LINK_OPTIONS
+• POSITION_INDEPENDENT_CODE
+• PRECOMPILE_HEADERS
+• SOURCES
+
+我们将在接下来的页面中讨论大多数这些选项
+
+为了在目标之间创建依赖关系,使用targette
+ 
+为了在目标之间创建依赖关系,使用target_link_libraries()命令
+```cmake
+target_link_libraries(<target>
+<PRIVATE|PUBLIC|INTERFACE> <item>...
+[<PRIVATE|PUBLIC|INTERFACE> <item>...]...)
+```
+
+传播关键字的工作方式：
+• PRIVATE 将源值添加到源目标的私有属性。
+• INTERFACE 将源值添加到源目标的接口属性。
+• PUBLIC 将值添加到源目标的两个属性。
+INTERFACE 属性仅用于将属性进一步传播到链中的下一个目标，而源目标在其构建过程中不会使用。
+
+
+处理冲突的传播属性
+
+
+当一个目标依赖于多个目标时，可能存在传播属性之间直接冲突的情况
+例如,一个使用的目标将 POSITION_INDEPENDENT_CODE 属性设置为 true,而另一个设置为false , CMake将这种冲突理解为错误,并打印出类似下面的错误信息:
+
+```cmake
+CMake Error: The INTERFACE_POSITION_INDEPENDENT_CODE property of "source_ target" does not
+agree with the value of POSITION_INDEPENDENT_CODE already determined for
+"destination_target".
+```
+
+为了确保只使用特定版本的库,可以创建一个自定义接口属性,INTERFACE_LIB_VERSION,并在其中存储版本
+
+CMake不会传播自定义属性,必须明确地将自定义属性添加到兼容属性列表中
+
+每个目标都有四个这样的列表
+
+• COMPATIBLE_INTERFACE_BOOL
+• COMPATIBLE_INTERFACE_STRING
+• COMPATIBLE_INTERFACE_NUMBER_MAX
+• COMPATIBLE_INTERFACE_NUMBER_MIN
+
+
 
