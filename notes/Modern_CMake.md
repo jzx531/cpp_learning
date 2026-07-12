@@ -1428,6 +1428,478 @@ $<condition:true_string>
 * $<OR: arg1, arg2, ...> : 逻辑或
 * $<BOOL:string_arg>: 这将字符串参数从字符串转换为布尔类型。
 
+使用 $<BOOL> 的字符串转换在以下条件都不满足时，将计算为布尔真（1）：
+• 字符串为空。
+• 字符串是 0、FALSE、OFF、N、NO、IGNORE 或 NOTFOUND 的不区分大小写的等价物。
+• 字符串以 -NOTFOUND 后缀结尾（区分大小写）。
+
+比较
+
+如果满足,比较将计算为1,否则为8,以下是一些可能有用的常见操作:
+
+• $<STREQUAL:arg1,arg2>: 这以区分大小写的方式比较字符串。
+• $<EQUAL:arg1,arg2>: 这将字符串转换为数字并比较相等性。
+• $<IN_LIST:arg,list>: 这检查 arg 元素是否在 list 列表中（区分大小写）。
+• $<VERSION_EQUAL:v1,v2>，$<VERSION_LESS:v1,v2>, $<VERSION_GREATER:v1,v2>，
+$<VERSION_LESS_EQUAL:v1,v2> 和 $<VERSION_GREATER_EQUAL:v1,v2> 以逐组件的方式比较版本。
+• $<PATH_EQUAL:path1,path2>: 这比较两个路径的词法表示，不进行标准化（自 CMake 3.24 起）。
+
+查询
+
+查询直接从变量返回布尔值,或者作为操作的结果
+
+```cmake
+$<TARGET_EXISTS:arg>
+```
+
+如果目标在配置阶段定义，将返回真。
+
+### 查询和转换
+
+处理字符串,列表和路径
+
+• $<LOWER_CASE:string>, $<UPPER_CASE:string>: 这会将字符串转换为所需的大
+小写。
+从 CMake 3.15 开始，以下操作可用：
+• $<IN_LIST:string,list>: 如果列表包含字符串值，则返回 true。
+• $<JOIN:list,d>: 使用 d 分隔符将分号分隔的列表连接起来。
+• $<REMOVE_DUPLICATES:list>: 去重列表（不排序）。
+• $<FILTER:list,INCLUDE|EXCLUDE,regex>: 使用正则表达式从列表中包含/排除项目
+
+从 3.27 开始，增加了 $<LIST:OPERATION> 生成器表达式，其中 OPERATION 是以下之一：
+• LENGTH
+• GET
+• SUBLIST
+• FIND
+• JOIN
+• APPEND
+• PREPEND
+• INSERT
+• POP_BACK
+• POP_FRONT
+• REMOVE_ITEM
+• REMOVE_AT
+• REMOVE_DUPLICATES
+• FILTER
+• TRANSFORM
+• REVERSE
+• SORT
+
+生成器表达式中处理列表相当罕见，所以只是了解其可能性。如果需要使用这些方式，请在线手册中查找如何使用这些操作的说明。最后，可以查询和转换系统路径，这对于可移植性敏感的项目非常有用。自 CMake 3.24 以来，以下简单查询可用：
+
+* $<PATH:HAS_ROOT_NAME,path>：检查路径是否包含“根名称”。在 Windows 上通常是盘符（如 C:），在 UNC 路径上可能是 //server。
+* $<PATH:HAS_ROOT_DIRECTORY,path>：检查路径是否包含“根目录”分隔符（即 / 或 \）。如果存在，通常意味着这是一个绝对路径。
+* $<PATH:HAS_ROOT_PATH,path>：检查路径是否包含“根路径”。（注：根路径通常是 ROOT_NAME + ROOT_DIRECTORY 的组合）。
+* $<PATH:HAS_FILENAME,path>：检查路径是否包含文件名部分。
+* $<PATH:HAS_EXTENSION,path>：检查路径是否包含扩展名（如 .cpp, .txt）。
+* $<PATH:HAS_STEM,path>：检查路径是否包含“词干”（Stem，即文件名去掉扩展名后的部分）。
+* $<PATH:HAS_RELATIVE_PART,path>：检查路径是否包含相对路径部分。
+* $<PATH:HAS_PARENT_PATH,path>：检查路径是否包含父目录路径。
+* $<PATH:IS_PREFIX[,NORMALIZE],prefix,path>: 如果前缀是路径的前缀，则返回真。
+
+$<PATH:APPEND,path...,input,...>
+功能：将 path 列表中的每一个路径与 input 进行拼接。
+用途：常用于批量给一组目录添加子目录路径。
+$<PATH:REMOVE_FILENAME,path...>
+功能：移除路径中的文件名部分，仅保留目录路径。
+示例：/home/user/file.txt -> /home/user
+$<PATH:REPLACE_FILENAME,path...,input>
+功能：将路径中的文件名替换为指定的 input 字符串。
+用途：用于根据源文件路径推导输出文件路径。
+$<PATH:REMOVE_EXTENSION[,LAST_ONLY],path...>
+功能：移除文件的扩展名。
+参数：可选参数 LAST_ONLY 表示只移除最后一个点号后的内容（例如处理 .tar.gz 时）。
+$<PATH:REPLACE_EXTENSION[,LAST_ONLY],path...,input>
+功能：将文件的扩展名替换为指定的 input。
+$<PATH:NORMAL_PATH,path...>
+功能：规范化路径，消除冗余的 . (当前目录) 和 .. (上级目录) 引用，并统一斜杠方向。
+$<PATH:RELATIVE_PATH,path...,base_directory>
+功能：计算 path 相对于 base_directory 的相对路径。
+$<PATH:ABSOLUTE_PATH[,NORMALIZE],path...,base_directory>
+功能：将相对路径转换为绝对路径。
+参数：如果包含 NORMALIZE，则会在转换过程中同时执行路径规范化操作。
+路径检索与查询类
+
+检索路径组件
+从 CMake 3.27 起，支持传入路径列表并检索特定的组件。
+常见指令包括：
+$<PATH:ROOT_NAME,...>：获取盘符（Windows）或根服务器名。
+$<PATH:FILENAME,...>：获取纯文件名。
+$<PATH:EXTENSION,...>：获取扩展名。
+$<PATH:STEM,...>：获取不带扩展名的文件名主体。
+条件判断（HAS_ / IS_）
+$<PATH:HAS_ROOT_NAME,...>：检查是否包含根名称。
+$<PATH:IS_ABSOLUTE,...>：检查是否为绝对路径。
+
+
+配置和平台参数化
+
+CMake 用户在构建项目时通常会提供所需构建配置的关键信息。大多数情况下，是 Debug
+或 Release。可以使用生成器表达式，通过以下语句访问这些值：
+• $<CONFIG>: 这将以字符串形式返回当前构建配置：Debug、Release 或另一个。
+• $<CONFIG:configs>: 如果 configs 包含当前构建配置（不区分大小写的比较），则返
+回真。
+第 4 章的“理解构建环境”部分讨论了平台，可以以与配置相同的方式读取相关信息：
+• $<PLATFORM_ID>: 将以字符串形式返回当前平台 ID：Linux、Windows 或 Darwin（macOS）。
+• $<PLATFORM_ID:platform>：如果 platform 包含当前平台 ID，则为真。
+这样的配置或平台特定的参数化，可以将其与之前讨论的条件展开一起使用：
+
+```cmake
+$<IF:condition,true_string,false_string>
+例如，可以为测试二进制文件和生产二进制文件应用不同的编译标志：
+target_compile_definitions(my_target PRIVATE
+ $<IF:$<CONFIG:Debug>,Test,Production>
+)
+```
+
+调整工具链
+
+
+以下是图片内容的 Markdown 转录及详细解析。这些内容主要涉及 CMake 中用于**检测编译器身份、版本及语言特性**的生成器表达式。
+
+
+- `$<LANG_COMPILER_ID>`：返回 `LANG` 编译器的 CMake 编译器 ID。
+- `$<LANG_COMPILER_VERSION>`：返回 `LANG` 编译器的 CMake 编译器版本。
+
+为了检查 C++ 编译时将使用哪个编译器，应该使用 `$<CXX_COMPILER_ID>` 生成器表达式。返回的值，即 CMake 的编译器 ID，是为每个支持的编译器定义的常量。可能会遇到如 AppleClang, ARMCC, Clang, GNU, Intel 和 MSVC 等值。完整的列表，请查看官方文档。
+
+与前一个部分类似，也可以在条件表达式中利用工具链信息。如果提供的任何参数与特定值匹配，有一些查询会返回真：
+
+- `$<LANG_COMPILER_ID:ids>`：如果 `ids` 包含 CMake 的 `LANG` 编译器 ID，则返回真。
+- `$<LANG_COMPILER_VERSION:vers>`：如果 `vers` 包含 CMake 的 `LANG` 编译器版本，则返回真。
+- `$<COMPILE_FEATURES:features>`：如果提供的所有 `features` 特征都由该目标的编译器支持，则返回真。
+
+需要目标参数的命令中，例如 `target_compile_definitions()`，可以使用一个目标特定的表达式来获取字符串值：
+
+- `$<COMPILE_LANGUAGE>`：这返回编译步骤中源文件的编程语言。
+- `$<LINK_LANGUAGE>`：这返回链接步骤中源文件的编程语言。
+
+---
+
+ 🔍 深度解析
+
+这段文本介绍了 CMake 构建系统中非常核心的**“自省”能力**。它允许构建脚本在配置阶段或生成阶段，“询问”当前的编译环境具体是什么，从而做出智能决策。
+ 1. 编译器身份识别 (`COMPILER_ID`)
+这是最基础的环境检测。
+- **语法**：`$<LANG_COMPILER_ID>`
+- **作用**：获取当前正在使用的编译器的唯一标识符。这里的 `LANG` 是占位符，实际使用时需替换为具体的语言，如 `C`、`CXX` (C++)、`Fortran` 等。
+- **常见返回值**：
+    - `GNU`: GCC 编译器
+    - `Clang`: LLVM Clang 编译器
+    - `MSVC`: Microsoft Visual C++
+    - `AppleClang`: macOS 上的 Xcode Clang
+- **应用场景**：当你需要针对特定编译器添加特殊的警告抑制选项或链接库时（例如：只有 MSVC 需要 `/wd4996`）。
+
+ 1. 编译器版本检测 (`COMPILER_VERSION`)
+- **语法**：`$<LANG_COMPILER_VERSION>`
+- **作用**：获取编译器的版本号字符串（例如 "9.0.1" 或 "19.28"）。
+- **应用场景**：某些 C++ 标准特性或编译器 Bug 修复仅在特定版本后生效。你可以用它来确保构建环境的兼容性。
+
+1. 条件判断与特性检查
+这部分展示了如何将上述信息用于逻辑判断（返回 `1` 或 `0`）：
+
+- **`$<LANG_COMPILER_ID:ids>`**：
+    - **功能**：检查当前编译器 ID 是否在提供的列表中。
+    - **示例**：`$<CXX_COMPILER_ID:GNU,Clang>`
+        - 如果是 GCC 或 Clang，返回 `1`。
+        - 如果是 MSVC，返回 `0`。
+    - **用途**：编写跨平台的通用构建规则。
+
+- **`$<COMPILE_FEATURES:features>`**：
+    - **功能**：**这是现代 CMake 推荐的做法**。它不直接检查编译器是谁，而是检查编译器**“能做什么”**。
+    - **示例**：`$<COMPILE_FEATURES:cxx_std_17>`
+        - 如果编译器支持 C++17，返回 `1`。
+    - **优势**：比检查 ID 更稳健。因为未来的新编译器可能 ID 不同，但依然支持 C++17。
+1. 语言上下文感知 (`COMPILE_LANGUAGE`)
+- **语法**：`$<COMPILE_LANGUAGE>`
+- **作用**：在处理混合语言项目（例如同时包含 `.c` 和 `.cpp` 文件）时，告诉 CMake 当前正在处理的是哪种语言的文件。
+- **典型应用**：
+    ```cmake
+    # 仅当编译 C++ 文件时，才添加 C++ 特有的定义
+    target_compile_definitions(my_target PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:USE_CPP_FEATURES>
+    )
+    ```
+    这样可以避免将 C++ 的宏错误地传递给 C 编译器，导致报错。
+
+的工具链（GCC/Clang/MSVC），而无需人工干预。
+
+单个目标可以由多种语言的源文件组合而成。例如，可以链接 C 工件与
+C++（应该在 project() 命令中声明这两种语言）。因此，引用特定语言的生成器表达式将用于一些源文件，但不会用于其他源文件。
+
+查询与目标相关的信息
+
+一些生成器表达式会从调用的命令中推断目标；最常用的是基本查询，其返回目标属性的值：
+
+```cmake
+$<TARGET_PROPERTY:prop>
+```
+
+• target_link_libraries() 命令中不太为人所知，但很有用的是$<LINK_ONLY:deps>生成器表达式。允许存储 PRIVATE 链接依赖，这些依赖不会通过传递的使用要求传播；这些在接口库中使用。
+
+$<INSTALL_PREFIX>：当目标使用 install(EXPORT) 导出或在内部 INSTALL_NAME_DIR 评估时，返回安装前缀；否则，返回空。
+$<INSTALL_INTERFACE:string>：使用 install(EXPORT) 导出时，返回 string。
+$<BUILD_INTERFACE:string>：使用 export() 命令或同一构建系统中的另一个目标导出时，返回 string。
+$<BUILD_LOCAL_INTERFACE:string>：同一构建系统中的另一个目标导出时，返回 string。
+然而，大多数查询都需要明确提供目标名称作为第一个参数：
+$<TARGET_EXISTS:target>：如果目标存在，则返回真。
+$<TARGET_NAME_IF_EXISTS:target>：如果目标存在，则返回目标名称，否则返回空字符串。
+$<TARGET_PROPERTY:target,prop>：返回目标 prop 属性的值。
+$<TARGET_OBJECTS:target>：返回对象库目标的对象文件列表。
+可以查询目标工件的路径：
+$<TARGET_FILE:target>：返回完整的路径。
+$<TARGET_FILE_NAME:target>：只返回文件名。
+$<TARGET_FILE_BASE_NAME:target>：只返回基本名称。
+$<TARGET_FILE_NAME:target>：返回不带前缀或后缀的基本名称（对于 libmylib.so，基本名称将是 mylib）。(注：此处原文可能有误，通常对应 TARGET_FILE_BASE_NAME)
+$<TARGET_FILE_PREFIX:target>：只返回前缀（例如，lib）。
+$<TARGET_FILE_SUFFIX:target>：只返回后缀（例如，.so 或 .exe）。
+$<TARGET_FILE_DIR:target>：只返回目录。
+
+转义
+极少数情况下,可能需要向生成器表达式传递一个具有特殊含义的字符,为了转义这种行为
+
+* $<ANGLE-R>: 一个 > 符号。
+* $<COMMA>: 一个逗号符号。
+* $<SEMICOLON>: 一个分号符号。
+
+能有些情况下，希望根据正在进行的构建类型进行不同的操作。一个简单且直接的方法是使用 $<CONFIG>生成器表达式：
+
+```cmake
+target_compile_options(tgt $<$<CONFIG:DEBUG>:-ginline-points>)
+```
+
+这句 CMake 代码的作用是：仅当构建配置为 Debug 模式时，向目标 tgt 添加特定的编译器选项 -ginline-points。
+
+```cmake
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+ target_compile_definitions(myProject PRIVATE LINUX=1)
+endif()
+```
+等价于
+
+```cmake
+target_compile_definitions(myProject PRIVATE
+ $<$<CMAKE_SYSTEM_NAME:LINUX>:LINUX=1>)
+```
+
+带有编译器特定标志的接口库
+
+```cmake
+add_library(enable_rtti INTERFACE)
+target_compile_options(enable_rtti INTERFACE
+$<$<OR:$<COMPILER_ID:GNU>,$<COMPILER_ID:Clang>>:-rtti>
+)
+```
+
+ 检查 COMPILER_ID 是否为 GNU；如果是，将 OR 计算为 1。
+• 如果不是，检查 COMPILER_ID 是否为 Clang，并将 OR 计算为 1。否则，将 OR 评估为 0。
+• 如果 OR 计算为 1，将 -rtti 添加到 enable_rtti 编译选项中。否则，不做任何事情。
+
+
+嵌套生成器表达式
+
+```cmake
+set(myvar "small text")
+set(myvar2 "small text >")
+
+file(GENERATE OUTPUT nesting CONTENT "
+1 $<PLATFORM_ID>
+2 $<UPPER_CASE:$<PLATFORM_ID>>
+3 $<UPPER_CASE:hello world>
+4 $<UPPER_CASE:${myvar}>
+5 $<UPPER_CASE:${myvar2}>
+")
+```
+
+1. PLATFORM_ID 的输出值是 LINUX。
+2. 嵌套值的输出将被正确地转换为大写的 LINUX。
+3. 可以转换普通字符串。
+4. 可以转换配置阶段的变量内容。
+5. 变量将首先插值，然后闭合的尖括号（>）将解释为生成器表达式的一部分，只有字符串的部分大写。
+
+布尔表达式与BOOL运算符的计算差异
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(Boolean CXX)
+
+file(GENERATE OUTPUT boolean CONTENT "
+1 $<0:TRUE>
+2 $<0:TRUE,FALSE> (won't work)
+3 $<1:TRUE,FALSE>
+4 $<IF:0,TRUE,FALSE>
+5 $<IF:0,TRUE,>
+")
+```
+1. 这是一个布尔展开，其中 BOOL 是 0；因此，TRUE 字符串不会写入。
+2. 这是一个典型的错误——作者原本打算根据 BOOL 值打印 TRUE 或 FALSE，但也是一个布尔假的展开，两个参数当作一个参数处理，因此不会输出。
+3. 这是相同错误的一个反转值——它是一个布尔真的展开，两者都在同一行写入。
+4. 这是一个以 IF 开头的正确条件表达式——输出 FALSE，因为第一个参数是 0。
+5. 这是条件表达式的正确用法，但当不需要为布尔假提供值时，应该使用第一行中的方式。
+
+
+## 使用CMake 编译 c++ 源代码
+
+创建和运行 C++ 程序涉及以下步骤：
+
+1. 设计应用程序：这包括规划应用程序的功能、结构和行为。设计完成后，按照最佳实践仔细编写源代码，以保持代码的可读性和可维护性。
+2. 将单独的.cpp 实现文件（也称为翻译单元）编译成目标文件：这一步涉及将编写的高级语言代码转换为低级机器代码。
+3. 将目标文件链接成单一的可执行文件：此步骤中，还会链接所有其他依赖项，包括动态和静态库。这个过程创建了一个可以在预期平台上运行的可执行文件。
+
+编译如何工作
+
+目标文件是单个源文件的直接翻译。每个文件都必须单独编译，然后由链接器组合成单一的可执行文件或库。这种模块化过程在修改代码时，因为只有程序员更新的文件需要重新编译，可以显著节省时间。
+
+编译器必须执行以下阶段以创建目标文件：
+
+• 预处理
+• 语法语义分析
+• 汇编
+• 优化
+• 代码生成
+
+CMake 提供了几个可以影响编译每个阶段的命令：
+
+• target_compile_features(): 要求编译器具有特定的功能来编译这个目标。
+• target_sources(): 向已定义的目标添加源文件。
+• target_include_directories(): 设置预处理器包含路径。
+• target_compile_definitions(): 设置预处理器定义。
+• target_compile_options(): 设置编译器特定的命令行选项。
+• target_precompile_headers(): 设置要优化的外部头文件。
+
+这些命令接受以下格式的类似参数:
+
+```cmake
+target_...(<target name> <INTERFACE|PUBLIC|PRIVATE> <arguments>)
+```
+
+使用以下命令指定目标构建所需的所有功能
+
+```cmake
+
+target_compile_features(<target> <PRIVATE|PUBLIC|INTERFACE>
+<feature> [...])
+```
+
+CMake 理解以下compiler_id的CPP标准和支持的编译器功能
+
+```cmake
+target_compile_features(my_target PUBLIC cxx_std_26)
+```
+
+这等同于 set(CMAKE_CXX_STANDARD 26) 和 set(CMAKE_CXX_STANDARD_REQUIRED ON)。不同之处在于 target_compile_features() 按目标工作，而不是全局地针对项目，如果需要为项目中的所有目标添加，可能会很繁琐。
+
+管理目标源文件
+
+随着解决方案的扩展,每个目标的文件列表也会增长
+
+```cmake
+file(GLOB helloworld_SRC "*.h" "*.cpp")
+add_executable(helloworld ${helloworld_SRC})
+```
+
+这种方法并不推荐。CMake 根据列表文件的变化生成构建系统，所以如果没有检测到
+变化，构建可能会在没有警告的情况下失败（这是开发者的噩梦）。此外，省略目标声明中的所有源文件，可能会干扰像 CLion 这样的 IDE 中的代码检查，因为它知道如何解析某些 CMake 命令，以理解项目。在目标声明中使用变量，并不建议的另一个原因是：创建了一个间接层，导致开发者在阅读项目时必须解包目标定义。遵循这一建议，需要面临另一个问题：如何条件性地添加源文件？这是一个常见的场景，当处理特定于平台的实现文件时，如 gui_linux.cpp 和 gui_windows.cpp。
+
+target_sources() 命令允许源文件附加到已经创建的目标:
+
+```cmake
+add_executable(main main.cpp)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(main PRIVATE gui_linux.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_sources(main PRIVATE gui_windows.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_sources(main PRIVATE gui_macos.cpp)
+else()
+    message(FATAL_ERROR "CMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME} not supported.")
+endif()
+```
+创建可执行文件
+add_executable(main main.cpp)：首先定义了一个名为 main 的可执行目标，并包含了通用的入口文件 main.cpp。
+
+条件判断逻辑
+使用 if/elseif/else 结构检查 CMake 内置变量 CMAKE_SYSTEM_NAME 的值：
+Linux：如果系统是 Linux，将 gui_linux.cpp 以 PRIVATE（私有）方式添加到 main 目标中。
+Windows：如果系统是 Windows，添加 gui_windows.cpp。
+Darwin (macOS)：如果系统是 macOS（CMake 中称为 Darwin），添加 gui_macos.cpp。
+
+
+### 配置预处理器
+
+预处理器最基本的特性是能够使用 #include 指令包含.h 和.hpp 头文件，它有两种形式：
+• 尖括号形式：#include <path-spec>
+• 引号形式: #include ”path-spec”
+预处理器将用路径规范中指定的文件内容替换这些指令。找到这些文件可能是一个挑战。应该搜索哪些目录，以及按照什么顺序？遗憾的是，C++ 标准并没有确切规定这一点，必须查阅正在使用的编译器的手册
+
+通常,尖括号形式将检查标准包含目录,这些目录包括存储在系统中的标准CPP库和标准头文件的目录
+
+引号形式首先在当前文件的目录中搜索包含的文件,然后检查尖括号形式的目录
+
+CMake 提供了一个命令来操作搜索包含文件的路径
+
+```cmake
+target_include_directories(<target> [SYSTEM] [AFTER|BEFORE]
+<INTERFACE|PUBLIC|PRIVATE> [item1...]
+[<INTERFACE|PUBLIC|PRIVATE> [item2...]
+...])
+```
+
+target_include_directories() 命 令 通 过 追 加 或 预 置 目 录， 来 修 改 目 标 的 INCLUDE_DIRECTORIES 属性，具体取决于是否使用了 AFTER 或 BEFORE 关键字。
+
+SYSTEM 关键字告诉编译器给定的目录应该视为标准系统目录（与尖括号形式一起使用）。对于许多编译器来说，这些目录是通过-isystem 标志传递的。
+
+
+预处理器定义
+
+```cpp
+#include <iostream>
+int main()
+{
+    #if defined(ABC)
+       std::cout << "ABC is defined." << std::endl;
+    #endif
+
+    #if (DEF > 10)
+       std::cout << "DEF is greater than 10." << std::endl;
+    #endif
+}
+```
+可以通过CMake传递给CPP编译器
+
+```cmake
+set(VAR 12)
+add_executable(my_executable my_executable.cpp)
+target_compile_definitions(defined PRIVATE ABC "DEF = ${VAR}")
+```
+
+
+这些定义是通过-D 标志（例如，-DFOO=1）传递给编译器的，一些开发者会继续在这个命令中使用这个标志：
+
+```cmake
+target_compile_definitions(hello PRIVATE -DFOO)
+```
+
+CMake 识别这一点,并自动移除前导的-D标志
+
+```cmake
+target_compile_definitions(hello PRIVATE -D FOO)
+```
+这种情况下, -D是一个单独的参数,移除后变成一个空字符串,然后忽略,从而确保正确的行为
+
+避免在单元测试中访问私有类字段一些在线资源建议使用特定的-D 定义与 #ifdef/ifndef 指令结合用于单元测试的目的。这种方法最直接的应用是将公共访问说明符包含在条件包含中，当定义了 UNIT_TEST 时，有效地使所有字段变为公共的（默认情况下，类字段私有）：
+
+```cpp
+class X{
+    #ifdef UNIT_TEST
+    public:
+    #endif
+    int a;
+    int b;
+};
+```
+
+
 
 
 
