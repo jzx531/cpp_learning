@@ -1316,3 +1316,118 @@ add_custom_command(OUTPUT person.pb.h person.pb.cc
 add_executable(serializer serializer.cpp person.pb.cc)
 ```
 
+假设正确处理了头文件的包含和 Protobuf 库的链接，当对.proto 文件进行更改时，一切
+都会自动编译和更新。
+一个简化的（实用性要小得多）示例是通过从另一个位置复制来创建必要的头文件：
+
+
+```cmake
+add_executable(main main.cpp constants.h)
+target_include_directories(main PRIVATE ${CMAKE_BINARY_DIR})
+add_custom_command(OUTPUT constants.h COMMAND cp
+ARGS "${CMAKE_SOURCE_DIR}/template.xyz" constants.h)
+```
+
+
+这时，“编译器”是 cp 命令。它通过从源树中复制到构建树根目录，创建一个 constants.h文件，从而满足 main 目标的依赖。
+
+add_custom_command() 命令的第二个版本引入了一个机制,用于在构建目标之前或之后执行目录:
+
+```cmake
+add_custom_command(TARGET <target>
+ PRE_BUILD | PRE_LINK | POST_BUILD
+ COMMAND command1 [ARGS] [args1...]
+ [COMMAND command2 [ARGS] [args2...] ...]
+ [BYPRODUCTS [files...]]
+ [WORKING_DIRECTORY dir]
+ [COMMENT comment]
+ [VERBATIM] [USES_TERMINAL]
+ [COMMAND_EXPAND_LISTS])
+ ```
+
+ • PRE_BUILD 将在此目标的所有其他规则之前运行（仅限 Visual Studio 生成器；对于其他生成器，行为类似于 PRE_LINK）。
+• PRE_LINK 将命令绑定在所有源代码编译完成后，但在链接（或归档）目标之前运行。不适用于自定义目标。
+• POST_BUILD 将在此目标的所有其他规则执行完毕后运行。
+
+
+## 使用生成器表达式
+
+CMake 在三个阶段构建解决方案：配置、生成和运行构建工具
+
+生成器表达式将在生成阶段进行计算（配置完成且构建系统创建后），所以将它们的输出捕获到变量，并输出到控制台并不是直接的操作。
+
+
+### 学习通用表达式语法的基本规则
+
+要使用生成器表达式，需要将其添加到支持生成器表达式计算的 CMake 命令中。大多数特定于目标的命令都支持，还有许多其他命令（查看特定命令的官方文档以了解更多信息）。
+
+```cmake
+target_compile_definitions(foo PUBLIC BAR=$<TARGET_FILE:baz>)
+```
+
+一个经常与生成器异常一起使用的命令是: target_compile_definitions()
+
+要使用生成器表达式,要将其作为命令参数提供,提供如下所示：
+
+```cmake
+target_compile_definitions(foo PUBLIC BAR=$<TARGET_FILE:baz>)
+```
+
+这个命令向编译器的参数中添加了一个-D 定义标志（先忽略 PUBLIC），将 BAR 预处理器定义设置为 foo 目标产生的二进制工件的路径 (生成器表达式以当前形式存储在变量中)。这种扩展推迟到了生成阶段，那时许多事情都已经配置并已知。
+
+BAR=$<TARGET_FILE:baz>：这里使用了生成器表达式。它的含义是：在编译 foo 时，定义一个名为 BAR 的宏，它的值等于目标 baz 最终生成的二进制文件的完整路径。
+
+<mark>
+ $<EXPRESSION: arg1,arg2,arg3>
+</mark>
+
+• 以美元符号和左括号（$<）开始。
+• 添加 EXPRESSION 名称。
+• 如果表达式需要参数，添加冒号（:）并提供 arg1, arg2 ⋯argN 值，用逗号（,）分隔。
+• 以大于号（>）结束表达式。
+
+除非明确指出,否则表达式通常是在使用表达式的目标上下文进行计算,这种关联是从使用表达式的命令中推断出的
+
+嵌套:
+
+将生成器表达式作为参数，传递给另一个生成器表达式的能力开始介绍，这也就是生成器表达式的嵌套：
+```cmake
+$<UPPER_CASE:$<PLATFORM_ID>>
+```
+
+### 条件扩展
+
+IF表达式依赖于嵌套才能发挥作用,可以将任何一个参数转换为另一个表达式,并产生相当复杂的计算
+
+```cmake
+$<IF:condition,true_string,false_string>
+```
+
+IF表达式依赖于嵌套才能发挥作用:可以将任何一个参数替换为另一个表达式,并产生相当复杂的计算,在条件不满足时跳过值的最佳选项是以下:
+
+```cmake
+$<IF:condition,true_string,>
+
+简略版本
+
+$<condition:true_string>
+```
+
+计算布尔值
+
+生成器表达式计算为两种类型之一:布尔值或字符串
+
+布尔类型可以隐式转换为字符串,但需要使用明确的BOOL运算符来做相反的操作
+
+有三类表达式可计算为布尔值:逻辑运算符,比较表达式和查询
+
+逻辑运算符:
+
+* $<NOT:arg> : 否定布尔参数
+* $<AND : arg1, arg2, ...> : 逻辑与
+* $<OR: arg1, arg2, ...> : 逻辑或
+* $<BOOL:string_arg>: 这将字符串参数从字符串转换为布尔类型。
+
+
+
+
