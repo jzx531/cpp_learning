@@ -1899,7 +1899,26 @@ class X{
 };
 ```
 
+配置头文件
 
+CMake 的 configure_file(<input> <output>) 命令使你能够从模板生成新文件
+
+```configure.h.in
+#cmakedefine FOO_ENABLE
+#cmakedefine FOO_STRING1 "@FOO_STRING1@"
+#cmakedefine FOO_STRING2 "${FOO_STRING2}"
+#cmakedefine FOO_UNDEFINED "@FOO_UNDEFINED@"
+```
+
+```cmake
+add_executable(configure configure.cpp)
+set(FOO_ENABLE ON)
+set(FOO_STRING1 "abc")
+set(FOO_STRING2 "def")
+configure_file(configure.h.in configured/configure.h)
+target_include_directories(configure PRIVATE
+${CMAKE_CURRENT_BINARY_DIR})
+```
 
 
 
