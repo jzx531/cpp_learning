@@ -1920,5 +1920,80 @@ target_include_directories(configure PRIVATE
 ${CMAKE_CURRENT_BINARY_DIR})
 ```
 
+配置优化器
+
+```cmake
+target_compile_options(<target> [BEFORE]
+<INTERFACE|PUBLIC|PRIVATE> [items1...]
+[<INTERFACE|PUBLIC|PRIVATE> [items2...]
+...])
+```
+
+大多数编译器提供从 0 到 3 的四个基本优化级别，使用-O< 级别 > 选项指定。-O0 表示没有优化，通常它是编译器的默认级别。另一方面，-O2 认为是完全优化，会生成高度优化的代码，但代价是编译时间最慢。
+
+• 使用-f 选项启用 -finline-functions.
+• 使用-fno 选项禁用 -fno-inline-functions.
+
+函数内联
+
+```cmake
+struct X {
+void im_inlined(){ cout << "hi\n"; };
+ void me_too();
+};
+inline void X::me_too() { cout << "bye\n"; };
+```
+
+如果没有内联合,代码将在main()中执行,直到方法调用
+
+
+可以通过为目标指定-O0（零级别），或直接处理负责内联的标志来实现这一点：
+• -finline-functions-called-once: 适用于 GCC。
+• -finline-functions: 适用于 Clang 和 GCC。
+• -finline-hint-functions: 适用于 Clang。
+可以使用-fno-inline-⋯明确禁用内联，为了详细信息，建议参考特定编译器的文档版本。
+
+循环展开
+
+这种策略旨在将循环转换为一系列完成相同结果的语句,这种方法以程序的小尺寸换取执行速度
+• -floop-unroll: GCC 版本。
+• -funroll-loops: Clang 版本。
+
+循环向量化
+
+```cmake
+for (i = 0; i<32; i+=4) {
+ a[ i ] = b[ i ] + 5;
+ a[i+1] = b[i+1] + 5;
+ a[i+2] = b[i+2] + 5;
+ a[i+3] = b[i+3] + 5;
+}
+```
+• -ftree-vectorize -ftree-slp-vectorize: GCC 中启用向量化
+• -fno-vectorize -fno-slp-vectorize:Clang 中禁用向量化
+
+### 管理编译过程
+
+预编译头文件
+
+头文件（.h）在编译开始前由预处理器包含在翻译单元中，所以每次.cpp 实现文件更改时，都必须重新编译。此外，如果多个翻译文件使用相同的共享头文件，每次包含时都必须编译。这种方式效率低下，但长期以来一直是标准做法。
+
+```cmake
+target_precompile_headers(<target>
+<INTERFACE|PUBLIC|PRIVATE> [header1...]
+[<INTERFACE|PUBLIC|PRIVATE> [header2...]
+...])
+```
+
+```cmake
+add_executable(precompiled hello.cpp)
+target_precompile_headers(precompiled PRIVATE <iostream>)
+```
+
+如果头文件相对稳定，可能会决定在目标中重用预编译头文件。为此，CMake 提供了一个方便的命令：
+```cmake
+target_precompile_headers(<target> REUSE_FROM <other_target>)
+```
+
 
 
