@@ -1995,5 +1995,425 @@ target_precompile_headers(precompiled PRIVATE <iostream>)
 target_precompile_headers(<target> REUSE_FROM <other_target>)
 ```
 
+• 将 CMAKE_UNITY_BUILD 变 量 设 置 为 true—— 将 在 定 义 的 所 有 目 标 上 初 始 化
+UNITY_BUILD 属性。
+• 手动将 UNITY_BUILD 目标属性设置为 true，适用于应该使用统一构建的所有目标。
+第二个选项通过以下方式实现：
+```cmake
+set_target_properties(<target1> <target2> ...
+PROPERTIES UNITY_BUILD true)
+```
+
+从版本 3.18 开始，可以显式定义文件应该如何分组，并为它们命名。为此，请将目标的UNITY_BUILD_MODE 属性更改为 GROUP（默认是 BATCH）。然后，通过设置它们的 UNITY_GROUP属性为选择的名称分组源文件：
+```cmake
+set_property(SOURCE <src1> <src2> PROPERTY UNITY_GROUP "GroupA")
+```
+
+Make 的文档建议不要为公共项目默认启用统一构建
+
+调试构建: 
+
+调试各个阶段:
+
+-save-temps，可以传递给 GCC 和 Clang 编译器，允许调试编译的各个阶段。这个标志将指示编译器将某些编译阶段的输出存储在文件中，而不是内存中。
+
+```cmake
+add_executable(debug hello.cpp)
+target_compile_options(debug PRIVATE -save-temps=obj)
+```
+
+调试头文件包含问题:
+
+```cmake
+add_executable(debug hello.cpp)
+target_compile_options(debug PRIVATE -H)
+```
+
+• CMAKE_CXX_FLAGS_DEBUG 包含 -g
+• CMAKE_CXX_FLAGS_RELEASE 包含 -DNDEBUG
+
+-g 标志的意思是“添加调试信息”，以操作系统的原生格式提供：stabs、COFF、XCOFF 或DWARF。
+
+## 链接可执行文件和库
+
+```mermaid
+graph TD
+    A["object_file.o"] --> B["ELF Header"]
+    B --> C[".text"]
+    C --> D[".data"]
+    D --> E[".rodata"]
+    E --> F["... (and many more)"]
+    F --> G["Section Headers"]
+
+    subgraph "General file description"
+        direction TB
+        B
+    end
+
+    subgraph "Sections with compiled source code for this translation unit only"
+        direction TB
+        C
+        D
+        E
+        F
+    end
+```
+
+• ELF 头部，标识目标操作系统（OS）、文件类型、目标指令集架构，以及 ELF 文件中两个
+头部表的位置和大小的详细信息：程序头部表（在对象文件中不存在）和节头部表。
+• 按类型分组信息的二进制节。
+• 节头部表，包含关于名称、类型、标志、内存中的目标地址、文件中的偏移量，以及其他信
+息。用于了解这个文件中有哪些节，以及它们的位置，就像目录一样。
+当编译器处理源代码时，将收集的信息分类到不同的节中。这些节构成了 ELF 文件的核心，
+位于 ELF 头部和节头部之间。以下是一些例子：
+• .text 节包含所有指定给处理器执行的机器代码指令。
+• .data 节保存初始化的全局和静态变量的值。
+• .bss 节为未初始化的全局和静态变量保留空间，这些变量在程序开始时初始化为零。
+• .rodata 节保存常量的值，使其成为一个只读数据段。
+• .strtab 节是一个字符串表，包含常量字符串，例如：来自基本 hello.cpp 示例的“Hello
+World”。
+• .shstrtab 节是一个字符串表，保存所有其他节的名字。
+
+```mermaid
+graph LR
+    subgraph A["A.o"]
+        direction TB
+        A_text[".text"]
+        A_data[".data"]
+        A_rodata[".rodata"]
+        A_strtab[".strtab"]
+    end
+
+    subgraph B["B.o"]
+        direction TB
+        B_text[".text"]
+        B_data[".data"]
+        B_rodata[".rodata"]
+        B_strtab[".strtab"]
+    end
+
+    subgraph Executable["linked executable"]
+        direction TB
+        E_text[".text"]
+        E_data_A[".data from A.o"]
+        E_data_B[".data from B.o"]
+        E_rodata[".rodata"]
+        E_strtab[".strtab"]
+        
+        style E_data_A fill:#fff,stroke:#333
+        style E_data_B fill:#fff,stroke:#333
+        style E_rodata fill:#e0e0e0,stroke:#333,stroke-dasharray: 5 5
+        style E_strtab fill:#e0e0e0,stroke:#333,stroke-dasharray: 5 5
+    end
+
+    %% Connections
+    A_data ==>|" "| E_data_A
+    B_data ==>|" "| E_data_B
+
+    %% Styling to match image layout roughly
+    classDef box fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef container fill:#eee,stroke:#ccc,stroke-width:2px;
+    
+    class A,B,Executable container;
+    class A_text,A_data,A_rodata,A_strtab,B_text,B_data,B_rodata,B_strtab,E_text box;
+```
+
+构建不同类型的库
+
+编译源码后，最好避免同一平台的代码重新编译，甚至将编译输出与外部项目共享。可以将最初生成的单个对象文件分发出去，但这会带来挑战。分发多个文件，并将它们逐个集成到构建系统中可能很麻烦，特别是在处理大量文件时。更有效的方法是将所有对象文件合并为一个单元以供共享。CMake 大大简化了这个任务。可以使用简单的 add_library() 命令（与target_link_libraries() 命令配对）生成这些库。
+
+• 类 Unix 系统中，静态库具有.a 扩展名，在 Windows 上为.lib。
+• 某些类 Unix 系统（如 Linux）上，共享库（和模块）具有.so 扩展名，而在其他系统（如macOS）上为.dylib。在 Windows 上，扩展名为.dll。
+• 共享模块通常使用与共享库相同的扩展名，但不总是如此。在 macOS 上，可以使用.so，特别是当模块是从另一个 Unix 平台移植过来时。
+
+
+静态库
+
+• 类 Unix 系统中，静态库具有.a 扩展名，在 Windows 上为.lib。
+• 某些类 Unix 系统（如 Linux）上，共享库（和模块）具有.so 扩展名，而在其他系统（如macOS）上为.dylib。在 Windows 上，扩展名为.dll。
+• 共享模块通常使用与共享库相同的扩展名，但不总是如此。在 macOS 上，可以使用.so，特别是当模块是从另一个 Unix 平台移植过来时。
+
+```cmake
+add_library(<name> [<source>...])
+
+add_library(<name> STATIC [<source>...])
+```
+
+共享库与静态库有显著不同。是使用链接器构建的，链接器完成了链接的两个阶段。这产生了一个包含节头、节和节头表的完整文件，如图 8.1 所示。
+共享库，通常称为共享对象，可以使用多个不同的应用程序同时使用。当第一个程序使用共享库时，操作系统会将该库的一个实例加载到内存中。随后，操作系统为其他程序提供相同的地址，这要归功于复杂的虚拟内存机制。然而，对于每个使用该库的进程，库的.data 和.bss 段是分别实例化的。这确保了每个进程，都可以调整其变量，而不影响其他进程。
+
+```cmake
+add_library(<name> SHARED [<source>...])
+```
+
+可以使用生成器表达式，查询产生的 SONAME 文件的一些路径属性（确保将 target 替换为目标名称）：
+• $<TARGET_SONAME_FILE:target> 返回完整路径 (.so.3)。
+• $<TARGET_SONAME_FILE_NAME:target> 只返回文件名。
+• $<TARGET_SONAME_FILE_DIR:target> 只返回相应文件夹路径。
+
+• 打包和安装过程中正确使用生成的库。
+• 编写自定义的 CMake 规则进行依赖管理。
+• 测试过程中利用 SONAME。
+• 构建后命令中复制或重命名生成的库。
+
+• $<TARGET_LINKER_FILE:target> 返回与生成的动态链接库（DLL）关联的.lib 导入
+库的完整路径。请注意，.lib 扩展名与静态 Windows 库相同，但应用并不相同。
+• $<TARGET_RUNTIME_DLLS:target> 返回目标在运行时依赖的 DLL 列表。
+• $<TARGET_PDB_FILE:target> 返回.pdb 程序数据库文件的完整路径（用于调试）。
+
+共享模块
+
+共享模块或模块共享库的一种变体,设计用于在运行时作为插件加载,与在程序启动时自动加载的标准共享库不同，共享模块仅在程序明确请求时加载,可以通过以下系统调用来完成:
+
+• 在 Windows 上使用 LoadLibrary
+• 在 Linux 和 macOS 上使用 dlopen()，然后是 dlsym()
+
+```cmake
+add_library(<name> MODULE [<source>...])
+```
+
+位置无关代码（PIC）
+
+由于使用了虚拟内存,程序本质上是某种程度上位置无关的,这项技术抽象了物理地址
+
+PIC 将符号（如对函数和全局变量的引用）映射到运行时地址。PIC 在二进制文件中引入了一个新的节：全局偏移表（GOT）。链接期间，计算了 GOT 节相对于.text 节（程序代码）的相对位置。所有符号引用将通过一个偏移量指向 GOT 中的占位符。
+
+共 享 库 和 模 块 的 所 有 源 代 码 必 须 在 使 用 PIC 标 志 激 活 的 情 况 下 编 译。 通 过 将POSITION_INDEPENDENT_CODE 目标属性设置为 ON，将告诉 CMake 适当地添加编译器特定的标志，例如为 GCC 或 Clang 添加-fPIC。
+
+```cmake
+set_target_properties(dependency
+PROPERTIES POSITION_INDEPENDENT_CODE ON)
+```
+
+这个属性对于共享库是自动启用的。如果共享库依赖于另一个目标，例如静态或对象库，也必须将这个属性应用于依赖目标：
+
+```cmake
+set_target_properties(dependency
+PROPERTIES POSITION_INDEPENDENT_CODE ON)
+```
+这段文字主要讲解了**位置无关代码（PIC）**的原理及其在 CMake 中的配置方法。为了让你更透彻地理解，我们可以从"为什么需要它"、"它是如何工作的"以及"如何在工程中配置"这三个层面来拆解：
+
+### 🎯 核心背景：虚拟内存与共享库的矛盾
+
+1.  **虚拟内存的抽象：**
+    *   现代操作系统使用虚拟内存，每个进程都认为自己独占整个内存空间。因此，程序编译时生成的地址通常是"相对地址"或"逻辑地址"，而不是物理硬件上的绝对地址。
+2.  **共享库（Shared Library）的特殊性：**
+    *   静态库会被直接复制进可执行文件，地址是固定的。
+    *   **共享库**（如 `.so` 或 `.dll`）则不同。同一个共享库可能被多个不同的进程同时加载到内存中。
+    *   **问题在于：** 由于操作系统的随机地址空间布局（ASLR）机制，或者因为内存碎片，这个共享库在进程 A 中的加载地址可能是 `0x1000`，而在进程 B 中可能是 `0x5000`。
+3.  **结论：** 共享库的代码段必须是**位置无关**的。也就是说，无论它被加载到内存的哪个角落，它内部的指令都能正确运行，不需要修改代码本身的二进制内容。
+
+### ⚙️ 技术原理：GOT 表的作用
+
+为了实现"位置无关"，编译器引入了**全局偏移表（Global Offset Table, GOT）**。
+
+*   **传统方式（非 PIC）：** 代码直接跳转到绝对地址（例如 `call 0x4000`）。如果库被移动了，这个地址就失效了，必须修改代码段（这在只读内存页中是不允许的，且效率低）。
+*   **PIC 方式：**
+    1.  **间接寻址：** 代码不再直接引用目标函数的绝对地址，而是引用 GOT 表中的一项。
+    2.  **相对定位：** 链接器知道 GOT 表相对于当前代码段（`.text`）的固定距离（偏移量）。
+    3.  **运行时重定位：** 当程序加载时，动态链接器（Loader）负责把真正的函数地址填入 GOT 表的对应位置。
+    4.  **执行流程：** CPU 执行指令 -> 找到 GOT 表（通过相对偏移） -> 读取 GOT 表中的真实地址 -> 跳转执行。
+
+**简单比喻：**
+想象你在住酒店（共享库）。
+*   **非 PIC：** 你的信上写着"送到北京市朝阳区XX路1号"。如果你换了一家酒店，这封信就寄不到了，得改信的内容。
+*   **PIC (GOT)：** 你的信上写着"送到前台信箱第3格"。无论你住哪家酒店，只要告诉前台"第3格放的是我的信"，你总能通过"找前台->查第3格"拿到信。这里的"前台信箱"就是 GOT。
+
+### 🛠️ 工程实践：CMake 中的配置
+
+这段文字的后半部分是在指导如何在构建系统（CMake）中正确处理依赖关系。
+
+#### 为什么要设置 `POSITION_INDEPENDENT_CODE ON`？
+
+*   **对于共享库本身：** CMake 默认会给共享库目标加上 `-fPIC` 编译选项，所以通常不需要手动设置。
+*   **对于依赖项（关键点）：** 如果你的共享库（Library A）依赖了一个静态库（Library B）或对象文件（Object File C），那么最终生成的共享库代码里会包含 B 和 C 的代码。
+    *   如果 B 和 C 在编译时没有加 `-fPIC`，它们生成的机器码就是"位置相关"的。
+    *   当这些"位置相关"的代码被链接进"位置无关"的共享库 A 时，会导致链接错误，或者导致生成的共享库无法在不同地址加载。
+
+#### 代码解读
+
+```cmake
+# 强制让 dependency 这个目标（无论是静态库还是对象库）
+# 在编译时加上 -fPIC 标志
+set_target_properties(dependency
+    PROPERTIES POSITION_INDEPENDENT_CODE ON)
+```
+
+**总结这条规则：**
+> **"共享库链条上的所有环节都必须是位置无关的。"**
+> 如果你要造一辆能在任何地形跑的车（共享库），那么你用的每一个零件（静态库/obj）都必须也是通用的，不能是焊死在特定底盘上的。
+
+
+static int i;
+
+如果尝试链接这个示例，会看到它是有效的，所以静态变量对于每个翻译单元是分开存储的。因此，对一个的修改不会影响另一个。
+
+解决动态链接中的重复符号问题
+
+假设有重复的cpp
+
+```cpp
+// a.cpp
+#include <iostream>
+void a()
+{
+    std::cout << "A" <<std::endl;
+}
+
+void duplicated()
+{
+    a();
+}
+
+// b.cpp
+#include <iostream>
+void b()
+{
+    std::cout << "B" <<std::endl;
+}
+
+void duplicated()
+{
+    b();
+}
+
+// main.cpp
+extern void a();
+extern void b();
+extern void duplicated();
+
+int main()
+{
+    duplicated();
+    return 0;
+}
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.10)
+project(Example)
+add_library(a SHARED a.cpp)
+add_library(b SHARED b.cpp)
+add_executable(main_i main.cpp)
+target_link_libraries(main_i a b)
+target_link_libraries(main_d b a)
+add_executable(main_d main.cpp)
+```
+main_i 优先链接a
+main_d 优先链接b
+
+使用命名空间_不要依赖连接器
+
+
+使用命名空间——不要依赖链接器
+C++ 命名空间是为了避免此类奇怪的问题，并更有效地处理 ODR 而发明的。最佳实践是将
+你的库代码包装在以库命名的命名空间中。这种策略有助于防止由于重复符号引起的复杂问题。项目中，我们可能会遇到一个共享库链接到另一个库的情况，形成一个长链。在复杂的配置中，这种情况很常见。然而，理解仅仅将一个库链接到另一个库，并不会引入任何类型的命名空间继承至关重要。这个链中的每个链接的符号都保留在编译时的原始命名空间中
+
+```cpp
+extern int b;
+int a = b;
+```
+
+target_link_libraries(main nested outer)
+
+有时会遇到循环引用,其中翻译单元相互定义符号,没有一种有效的顺序可以满足所有的引用
+
+为了解决这个问题的唯一方法是对某些目标进行两次处理
+
+```cmake
+target_link_libraries(main nested outer nested)
+```
+
+1. 链接器处理了 main.o 发现对 a 变量的未定义引用,并将其收集起来以备将来解析
+2. 链接器处理了libnested.a 没有发现未定义的引用,也没有需要解析的
+3. 链接器处理了libouter.a 发现对b变量的未定义引用,并解析了对a变量的引用
+
+• 静态初始化：如果库有需要在 main() 之前初始化的全局对象（即构造函数需要执行），并且这些对象在其它地方没有直接引用；链接器可能会将其从最终二进制文件中排除。
+• 插件架构：如果正在开发一个插件系统（带有模块库），其中代码需要在运行时进行识别和加载，而不需要直接引用。
+• 静态库中的未使用代码：如果正在开发一个包含实用函数或代码的静态库，这些代码并非总是直接引用，但仍然希望它们出现在最终二进制文件中。
+• 模板实例化：对于重度依赖模板的库；如果未明确提及，一些模板实例化可能会在链接过程中忽略。
+• 链接问题：特别是对于复杂的构建系统或详尽的代码库，链接可能会产生不可预测的结果，其中某些符号或代码部分似乎缺失。
+
+```cmake
+target_link_options(tgt INTERFACE
+    -WL , --whole-archive $<TARGET_FILE:lib1> -WL, --no-whole-archive)
+```
+
+然而,这个命令是特定于链接器的，因此结合生成器表达式,来检测不同的编译器,并提供必要的标志
+
+```cmake
+target_link_options(tgt INTERFACE
+    "$<LINK_LIBARY:WHOLE_ARCHIVE,lib1>"
+)
+```
+
+使用这种方法可以确保 tgt 目标包含 lib1 库的所有对象文件。
+尽管如此，还需要考虑一些潜在的问题：
+• 增加二进制文件大小：这个标志可能会大幅增加最终二进制文件大小，其包含了指定库的所有对象文件，无论是否使用。
+• 符号冲突的可能性：引入所有符号可能会导致与其他符号冲突，从而引发链接错误。
+• 维护负担：过度依赖此类标志会掩盖代码设计或结构中的潜在问题。
+
+分离main()进行测试
+
+```cpp
+extern int start_program(int, const char**);
+int main(int argc, const char ** argv)
+{
+    return start_program(argc, argv);
+}
+```
+
+```cpp
+#include <iostream>
+int start_program(int argc,const char** argv)
+{
+    if(argc <= 1){
+        std::cout <<"not enough arguments"<<std::endl;
+        return 1;
+    }
+    return 0;
+}
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(Testing CXX)
+add_library(program program.cpp)
+add_executable(test test.cpp)
+target_link_libraries(test program)
+```
+
+在现实世界的场景中，像 GoogleTest 或 Catch2 这样的框架将提供自己的 main() 方法，可以用来替换程序的入口点并运行所有定义的测试
+
+```cpp
+#include <iostream>
+
+extern int start_program(int, const char**);
+using namespace std;
+
+int main() {
+    cout << "Test 1: Passing zero arguments to start_program:\n";
+    auto exit_code = start_program(0, nullptr);
+    if (exit_code == 0)
+        cout << "Test FAILED: Unexpected zero exit code.\n";
+    else
+        cout << "Test PASSED: Non-zero exit code returned.\n";
+    cout << endl;
+
+    cout << "Test 2: Passing 2 arguments to start_program:\n";
+    const char *arguments[2] = {"hello", "world"};
+    exit_code = start_program(2, arguments);
+    if (exit_code != 0)
+        cout << "Test FAILED: Unexpected non-zero exit code\n";
+    else
+        cout << "Test PASSED\n";
+}
+```
+
+## 管理依赖关系
+
+
+
+
 
 
