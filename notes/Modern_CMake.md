@@ -2412,6 +2412,10 @@ int main() {
 
 ## 管理依赖关系
 
+扫描通常安装包的路径（取决于操作系统），查找匹配以下模式的文件：
+• <CamelCasePackageName>Config.cmake
+• <kebab-case-package-name>-config.cmake
+
 
 
 
