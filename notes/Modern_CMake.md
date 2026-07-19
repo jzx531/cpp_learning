@@ -2417,6 +2417,548 @@ int main() {
 • <kebab-case-package-name>-config.cmake
 
 
+管理protobuf
+
+```cmake
+cmake_minimum_required(VERSION 3.26.0)
+project(FindPackageProtobufVariables CXX)
+find_package(Protobuf REQUIRED)
+protobuf_generate_cpp(GENERATED_SRC GENERATED_HEADER message.proto)
+add_executable(main main.cpp ${GENERATED_SRC} ${GENERATED_HEADER})
+target_link_libraries(main PRIVATE ${Protobuf_LIBRARIES})
+target_include_directories(main PRIVATE
+${Protobuf_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+```
+
+• find_package(Protobuf REQUIRED) 告诉 CMake 找到 Protobuf 库（通过执行捆
+绑的 FindProtobuf.cmake find 模块）并为项目准备使用。因为我们使用了 REQUIRED
+关键字，如果找不到库，构建将停止。
+• protobuf_generate_cpp 是 Protobuf find 模块中定义的自定义函数，自动化
+调用 protoc 编译器的过程。成功编译后，将生成的源文件路径存储在提供的前两个参
+数 GENERATED_SRC 和 GENERATED_HEADER 中。后续参数将视为要编译的文件列表
+（message.proto）
+
+论使用内置的 find 模块还是配置文件，在成功找到包之后，可以期望设置以下全部或部分变量：
+
+• <PKG_NAME>_FOUND: 这表明是否成功找到了包。
+• <PKG_NAME>_INCLUDE_DIRS 或 <PKG_NAME>_INCLUDES: 这指向包的头文件所在的目
+录。
+• <PKG_NAME>_LIBRARIES 或 <PKG_NAME>_LIBS: 这些是要链接的库的列表。
+• <PKG_NAME>_DEFINITIONS: 包含包所需的编译器定义。
+
+```cmake
+cmake_minimum_required(VERSION 3.26.0)
+project(FindPackageProtobufTargets CXX)
+find_package(Protobuf REQUIRED)
+protobuf_generate_cpp(GENERATED_SRC GENERATED_HEADER message.proto)
+add_executable(main main.cpp ${GENERATED_SRC} ${GENERATED_HEADER})
+target_link_libraries(main PRIVATE protobuf::libprotobuf)
+target_include_directories(main PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+```
+
+```cmake
+
+ind_package(<Name> [version] [EXACT] [QUIET] [REQUIRED])
+```
+
+• EXACT: 与非范围 [version] 一起使用，告诉 CMake 需要确切的版本，而不是更新的
+版本。
+• QUIET: 这将抑制关于包是否被找到的所有消息。
+• REQUIRED: 如果找不到包，这将停止构建，并且即使使用了 QUIET，也会显示诊断信息。
+
+```cmake
+cmake -B <build tree> -S <source tree> --debug-find-pkg=<pkg>
+```
+
+1. 如果库和头文件的路径已经知道（由用户提供或从之前的运行的缓存中检索），使用这些路径来创建一个 IMPORTED 目标。如果这样做，可以停止。
+2. 如果路径未知，首先找到底层依赖项（这种情况下是 PostgreSQL）的库和头文件。
+3. 接下来，搜索已知路径以定位 PostgreSQL 客户端库的二进制版本。
+4. 同样，扫描已知路径以找到 PostgreSQL 客户端的头文件。
+5. 最后，确认是否同时找到了库和头文件。如果是，创建一个 IMPORTED 目标。
+
+定义 IMPORTED 目标
+
+IMPORTED_LOCATION 和
+INTERFACE_INCLUDE_DIRECTORIES。
+
+```cmake
+# define IMPORTED targets
+function(define_imported_target library headers)
+    add_library(XX::PQXX UNKNOWN IMPORTED)
+    set_target_properties(PQXX::PQXX PROPERTIES
+    IMPORTED_LOCATION ${library}
+    INTERFACE_INCLUDE_DIRECTORIES ${headers}
+    )
+    set(PQXX_FOUND 1 CACHE INTERNAL "PQXX found" FORCE)
+    set(PQXX_LIBRARIES ${library}
+    CACHE STRING "Path to pqxx library" FORCE)
+    set(PQXX_INCLUDES ${headers}
+    CACHE STRING "Path to pqxx headers" FORCE)
+    mark_as_advanced(FORCE PQXX_LIBRARIES)
+    mark_as_advanced(FORCE PQXX_INCLUDES)
+    endfunction()
+```
+
+接受用户提供的路径并重用缓存值
+考虑一种情况，即用户在非标准位置安装了 PQXX，并通过命令行参数使用-D 提供了所需的
+路径。如果是这样，我们立即调用我们之前定义的函数并使用 return() 停止搜索。假设用户已经提供了库，及其依赖项（如 PostgreSQL）的准确路径：
+
+```cmake
+# Accepting user-provided paths and reusing cached values
+ if (PQXX_LIBRARIES AND PQXX_INCLUDES)
+ define_imported_target(${PQXX_LIBRARIES} ${PQXX_INCLUDES})
+ return()
+ endif()
+```
+
+搜索嵌套依赖项
+为了使用 PQXX，主机系统也必须安装了 PostgreSQL。虽然在当前 find 模块中使用另一
+个 find 模块是可行的，但应该传递 REQUIRED 和 QUIET 标志，以确保嵌套搜索和主搜索之间的行为一致。为此，将设置两个辅助变量来存储需要传递的关键词，并根据 CMake 接收到的参数来对其进行填充：PQXX_FIND_QUIETLY 和 PQXX_FIND_REQUIRED。
+
+
+```cmake
+# Searching for nested dependencies
+set(QUIET_ARG)
+ if(PQXX_FIND_QUIETLY)
+ set(QUIET_ARG QUIET)
+ endif()
+
+ set(REQUIRED_ARG)
+ if(PQXX_FIND_REQUIRED)
+ set(REQUIRED_ARG REQUIRED)
+ endif()
+ fine_package(PostgreSQL ${QUIET_ARG} ${REQUIRED_ARG})
+```
+
+搜索库文件
+CMake 提供了 find_library() 命令来帮助查找库文件。这个命令将接受要查找的文件名
+和可能的路径列表，格式化为 CMake 的路径样式：
+```cmake
+find_library(<VAR_NAME> NAMES <NAMES> PATHS <PATHS> <...>)
+```
+
+<VAR_NAME> 将作为存储命令输出的变量的名称。如果找到匹配的文件，其路径将存储
+在 <VAR_NAME> 变量中。否则，<VAR_NAME>-NOTFOUND 变量将设置为 1。我们将使用
+PQXX_LIBRARY_PATH 作为我们的 VAR_NAME，所以将得到 PQXX_LIBRARY_PATH 中的路
+径，或者 PQXX_LIBRARY_PATH-NOTFOUND 中的 1。
+
+PQXX 库通常将其位置导出到 $ENV{PQXX_DIR} 环境变量，所以系统可能已经知道其位置。
+可以包含 file(TO_CMAKE_PATH) 这个格式化的路径：
+
+```cmake
+# Searching for library files
+ file(TO_CMAKE_PATH "$ENV{PQXX_DIR}" _PQXX_DIR)
+ find_library(PQXX_LIBRARY_PATH NAMES libpqxx pqxx
+ PATHS
+ ${_PQXX_DIR}/lib/${CMAKE_LIBRARY_ARCHITECTURE}
+ # (...) many other paths - removed for brevity
+ /usr/lib
+ NO_DEFAULT_PATH
+ )
+```
+NO_DEFAULT_PATH 关键字指示 CMake 跳过其标准搜索路径列表。虽然不想这样做（默认
+路径通常正确），但使用 NO_DEFAULT_PATH 允许在必要时明确指定相应的搜索位置。
+
+```cmake
+# Searching for header files
+ind_path(PQXX_HEADER_PATH NAMES pqxx/pqxx
+ PATHS
+ ${_PQXX_DIR}/include
+ # (...) many other paths - removed for brevity
+ /usr/include
+ NO_DEFAULT_PATH
+ )
+```
+
+返回最终结果
+现 在， 检 查 是 否 设 置 了 PQXX_LIBRARY_PATH-NOTFOUND 或
+PQXX_HEADER_PATHNOTFOUND 变量。可以手动打印诊断消息并停止构建，或者使用 CMake
+的 find_package_handle_standard_args() 辅助函数。如果这个函数的路径变量正确填
+充，则将 <PKG_NAME>_FOUND 变量设置为 1。它还提供适当的诊断消息（会尊重 QUIET 关键字），并在 find_package() 调用中提供 REQUIRED 关键字时，如果路径变量未找到，则会以FATAL_ERROR 停止执行。
+
+```cmake
+# Returning the final results
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(PQXX
+    REQUIRED_VARS PQXX_LIBRARY_PATH PQXX_HEADER_PATH
+)
+if (PQXX_FOUND)
+define_imported_target(
+    "${PQXX_LIBRARY_PATH};${POSTGRES_LIBRARIES}"
+    "${PQXX_HEADER_PATH};${POSTGRES_INCLUDE_DIRECTORIES}")
+elseif(XX_FIND_REQUIRED)
+    message(FATAL_ERROR "PQXX not found")
+endif()
+```
+
+这段代码是 CMake 中用于编写自定义查找模块（`FindPQXX.cmake`）的典型片段。它的核心作用是：**标准化地验证 `PQXX`（libpqxx，PostgreSQL 的 C++ 客户端库）是否被成功找到，并根据结果决定是创建导入目标（Imported Target）还是报错终止构建。**
+
+我们可以将这段代码拆解为以下几个关键部分来理解：
+
+### 1. 引入并调用标准化处理宏
+```cmake
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(PQXX
+    REQUIRED_VARS PQXX_LIBRARY_PATH PQXX_HEADER_PATH
+)
+```
+*   **`include(...)`**：引入 CMake 提供的标准参数处理模块 `FindPackageHandleStandardArgs`。
+*   **`find_package_handle_standard_args(PQXX ...)`**：这是 CMake 提供的“错误处理工具箱”。它的主要作用是统一处理 `find_package` 的结果。
+    *   它会检查 `REQUIRED_VARS` 后面列出的变量（即 `PQXX_LIBRARY_PATH` 和 `PQXX_HEADER_PATH`）是否都被正确定义且非空。
+    *   如果这两个变量都存在，它会自动将全局变量 `PQXX_FOUND` 设置为 `TRUE`，并输出友好的成功提示。
+    *   如果缺失，它会将 `PQXX_FOUND` 设置为 `FALSE`，并根据用户是否传入了 `REQUIRED` 或 `QUIET` 参数，自动输出标准化的错误信息或保持静默。
+
+### 2. 条件分支：成功找到库
+```cmake
+if (PQXX_FOUND)
+    define_imported_target(
+        "${PQXX_LIBRARY_PATH};${POSTGRES_LIBRARIES}"
+        "${PQXX_HEADER_PATH};${POSTGRES_INCLUDE_DIRECTORIES}")
+```
+*   如果上一步验证通过，`PQXX_FOUND` 为真，则进入此分支。
+*   这里调用了一个自定义函数或宏 `define_imported_target`。在现代 CMake 的最佳实践中，找到库后通常会创建一个 `IMPORTED` 目标（例如 `PQXX::PQXX`）。
+*   它将找到的 PQXX 库路径与底层的 PostgreSQL 库路径（`POSTGRES_LIBRARIES`）合并，并将两者的头文件路径也合并，打包成一个统一的目标。这样，后续使用者只需 `target_link_libraries(... PQXX::PQXX)`，就能自动获得所有需要的头文件路径和链接依赖，避免变量污染。
+
+### 3. 条件分支：未找到库且为必需依赖
+```cmake
+elseif(XX_FIND_REQUIRED)
+    message(FATAL_ERROR "PQXX not found")
+endif()
+```
+*   如果 `PQXX_FOUND` 为假，说明库没找全或没找到。
+*   此时检查 `XX_FIND_REQUIRED` 变量。在 CMake 中，当用户调用 `find_package(PQXX REQUIRED)` 时，CMake 会自动设置 `PQXX_FIND_REQUIRED` 为 `TRUE`。*(注：代码中的 `XX` 极大概率是 `PQXX` 的笔误，应为 `PQXX_FIND_REQUIRED`)*。
+*   如果该变量为真，说明用户强制要求必须有这个库，此时会抛出 `FATAL_ERROR` 直接终止 CMake 配置过程。
+*   **补充说明**：实际上，如果使用了 `find_package_handle_standard_args` 且用户传了 `REQUIRED`，该宏内部已经会自动抛出 `FATAL_ERROR`。这里的 `elseif` 分支更多是一种防御性编程，或者用于处理某些特殊的自定义错误提示逻辑。
+
+**总结：**
+这段代码遵循了 CMake 官方推荐的模块编写规范：先用标准宏验证关键变量，验证通过后创建现代的 Imported Target 供项目链接，验证失败则根据用户的 `REQUIRED` 标志决定是否中断构建。
+
+
+使用 FindPkgConfig 发现遗留包
+
+• 如果库没有提供.pc PkgConfig 文件，为一种过时的工具编写定义文件就没有多大价值
+• 可以选择一个支持 CMake 的库的新版本（将在本章稍后讨论如何从互联网上下载依赖项）
+• 该包广泛使用，CMake 的最新版本可能已经包含了它的 find 模块
+• 在线有社区创建的 find 模块可用，并且其许可证允许你使用它，也是另一个不错的选择
+• 能编写和维护自己的 find 模块
+
+但并不是所有环境都可以快速更新到库的最新版本。许多公司仍在生产中使用遗留系统，这些
+系统不再接收最新包。如果在系统中有一个特定库的.pc 文件，看起来就像这里显示的 foobar文件一样：
+
+
+如果在系统中有一个特定库的.pc 文件，看起来就像这里显示的 foobar
+文件一样：
+```cmake
+prefix=/usr/local
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${exec_prefix}/lib
+Name: foobar
+Description: A foobar library
+Version: 1.0.0
+Cflags: -I${includedir}/foobar
+Libs: -L${libdir} -lfoobar
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26.0)
+project(FindPkgConfig CXX)
+ind_package(PkgConfig REQUIRED)
+pkg_check_modules(PQXX REQUIRED IMPORTED_TARGET libpqxx)
+message("PQXX_FOUND: ${PQXX_FOUND}")
+add_executable(main main.cpp)
+target_link_libraries(main PRIVATE PkgConfig::PQXX)
+```
+1. 使用 find_package() 命令来定位 PkgConfig。如果 pkg-config 缺失，则由于
+REQUIRED 关键字，过程将停止。
+2. FindPkgConfig find 模块中的 pkg_check_modules()，自定义宏设置了一个名为
+PQXX 的新 IMPORTED 目标。find 模块寻找 libpqxx 依赖项，如果找不到，将再次因
+为 REQUIRED 关键字而失败。IMPORTED_TARGET 关键字至关重要；否则，需要手动定义
+目标。
+3. 使用 message() 函数验证设置，显示 PQXX_FOUND。如果之前没有使用 REQUIRED，这里需要检查变量是否设置，以激活其他备选方案。
+4. 使用 add_executable() 声明主可执行文件。
+5. 最后，使用 target_link_libraries() 将 PkgConfig::PQXX 目标链接起来，这个目标是由 pkg_check_modules() 导入的。注意，PkgConfig:: 是一个固定的前缀，PQXX
+从传递给宏的第一个参数派生出来。
+
+### 使用系统中不存在的依赖项
+
+FetchContent
+
+• 管理外部项目的目录结构
+• 从 URL 下载源代码（如果需要，还可以从存档中提取）
+• 支持 Git、Subversion、Mercurial 和 CVS（并发版本系统）仓库
+• 在需要时获取更新
+• 使用 CMake、Make 或用户指定的工具配置和构建项目
+• 提供对其他目标的嵌套依赖
+
+1. 使用 include(FetchContent) 将模块添加到项目中。
+2. 使用 FetchContent_Declare() 命令配置依赖项。告知 FetchContent 依赖项的位
+置，以及应该使用哪个版本。
+3. 使用 FetchContent_MakeAvailable() 命令完成依赖项设置。这将下载、构建、安装，并将列表文件添加到主项目以供解析。
+
+```cmake
+FetchContent_Declare(<depName> <contentOptions>...)
+```
+
+depName 是依赖项的唯一标识符，稍后将由 FetchContent_MakeAvailable() 命令使
+用。
+
+contentOptions 提 供 了 依 赖 项 的 详 细 配 置， 这 可 能 相 当 复 杂。 重 要 的 是， 在 底 层，FetchContent_Declare() 使用较旧的 ExternalProject_Add() 命令。事实上，提供
+给 FetchContent_Declare 的大多数参数都会直接转发给内部调用。在详细解释所有参数之前，先看一个从 GitHub 下载依赖项的工作示例。
+
+
+基本的YAML读取器示例
+
+```cmake
+#include <string>
+ #include <iostream>
+ #include "yaml-cpp/yaml.h"
+
+ using namespace std;
+ int main() {
+ string name = "Guest";
+
+ YAML::Node config = YAML::LoadFile("config.yaml");
+ if (config["name"])
+ name = config["name"].as<string>();
+
+ cout << "Welcome " << name << endl;
+ return 0;
+ }
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26.0)
+project(ExternalProjectGit CXX)
+add_executable(welcome main.cpp)
+configure_file(config.yaml config.yaml COPYONLY)
+include(FetchContent)
+FetchContent_Declare(external-yaml-cpp
+ GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+ GIT_TAG 0.8.0
+)
+FetchContent_MakeAvailable(external-yaml-cpp)
+target_link_libraries(welcome PRIVATE yaml-cpp::yaml-cpp)
+```
+
+可以显式访问由 yaml-cpp 库创建的目标，我们将使用 CMakePrintHelpers 帮助模块：
+```cmake
+ include(CMakePrintHelpers)
+ cmake_print_properties(TARGETS yaml-cpp::yaml-cpp
+ PROPERTIES TYPE SOURCE_DIR)
+```
+
+当构建项目时,配置阶段将打印以下输出
+```cmake
+Properties for TARGET yaml-cpp::yaml-cpp:
+yaml-cpp.TYPE = "STATIC_LIBRARY"
+yaml-cpp.SOURCE_DIR = "/tmp/b/_deps/external-yaml-cpp-src"
+```
+
+由于我们已经使用 configure_file() 命令将.yaml 文件复制到输出，我们可以运行程
+序：
+```bash
+~/examples/ch09/05-fetch-content$ /tmp/b/welcome
+Welcome Rafal
+```
+
+下载依赖项
+FetchContent_Declare() 命令提供了广泛的选择，这些选择来自 ExternalProject
+模块。可以执行三个操作：
+• 下载依赖项
+• 更新依赖项
+• 补丁依赖项
+首先，看看最常见的场景：从互联网上获取文件。
+CMake 支持多种下载源：
+• HTTP 服务器 (URL)
+• Git
+• Subversion
+• Mercurial
+• CVS
+从列表顶部开始，首先探索如何从 URL 下载依赖项，并自定义流程以满足我们的需求。
+更新和打补丁
+可以提供一个 URL 列表，按顺序扫描，直到下载成功。CMake 将识别下载的文件是否是存
+档，并默认解压它。
+基本声明：
+```cmake
+FetchContent_Declare(dependency-id
+URL <url1> [<url2>...]
+)
+```
+
+• URL_HASH <algo>=<hashValue>: 检查会通过，生成的下载文件的校验和是否与提供
+的 <hashValue> 匹配。推荐使用此选项以保证下载的完整性。以下算法受支持：: MD5,
+SHA1, SHA224, SHA256, SHA384, SHA512, SHA3_224, SHA3_256, SHA3_384
+和 SHA3_512
+• DOWNLOAD_NO_EXTRACT <bool>: 这会显式禁用下载后的解压，可以在后续步骤中通过
+访问 <DOWNLOADED_FILE> 变量来使用下载文件的文件名。
+• DOWNLOAD_NO_PROGRESS <bool>: 这会显式禁用下载进度的日志记录。
+• TIMEOUT <seconds> 和 INACTIVITY_TIMEOUT <seconds>: 这些选项设置超时，以
+在固定的总时间或非活动期后终止下载。
+• HTTP_USERNAME <username> 和 HTTP_PASSWORD <password>: 这些选项配置
+HTTP 认证。请注意不要硬编码凭据。
+• HTTP_HEADER <header1> [<header2>...]: 这会向 HTTP 请求添加头部信息，这对
+于 AWS 或自定义令牌很有用。
+• TLS_VERIFY <bool>: 这 会 验 证 SSL 证 书。 如 果 未 设 置，CMake 将 从
+CMAKE_TLS_VERIFY 变量中读取此设置，该变量默认设置为 false。跳过 TLS 验证
+是一种不安全的、不良的做法，尤其是在生产环境中应避免。
+• TLS_CAINFO <file>: 这提供了到权威文件的路径；如果未指定，CMake 将从
+CMAKE_TLS_CAINFO 变量中读取此设置。如果你的公司有颁发自签名 SSL 证书，这就
+很有用了。
+
+从Git下载
+
+```cmake
+FetchContent_Declare(dependency-id
+GIT_REPOSITORY <url>
+GIT_TAG <tag>
+)
+```
+
+<url> 和 <tag> 应与 git 命令兼容。生产环境中，建议使用特定的 git 哈希（而不是
+标签）以确保生成二进制文件的可追溯性，并避免不必要的 git fetch 操作。如果更喜欢使用
+分支，请坚持使用 origin/main 这样的远程名称。这确保了本地克隆的正确同步。
+其他选项包括：
+• GIT_REMOTE_NAME <name>: 这设置了远程名称（默认为 origin）。
+• GIT_SUBMODULES <module>...: 这指定要更新的子模块；从 3.16 版本开始，此值默
+认为 none（之前，所有子模块都会更新）。
+• GIT_SUBMODULES_RECURSE 1: 这启用子模块的递归更新。
+• GIT_SHALLOW 1: 这执行浅克隆，由于跳过下载历史提交，因此速度更快。
+• TLS_VERIFY <bool>: 这 会 验 证 SSL 证 书。 如 果 未 设 置，CMake 将 从
+CMAKE_TLS_VERIFY 变量中读取此设置，该变量默认设置为 false；跳过 TLS 验证
+是一种不安全的、不良的做法，尤其是在生产环境中应避免。
+
+```cmake
+FetchContent_Declare(dependency-id
+SVN_REPOSITORY <url>
+SVN_REVISION -r<rev>
+)
+```
+
+• SVN_USERNAME <user> 和 SVN_PASSWORD <password>: 这些提供检出和更新的凭
+据，避免在项目中硬编码这些。
+• SVN_TRUST_CERT <bool>: 这会跳过对 Subversion 服务器站点证书的验证。只有当
+服务器的网络路径，及其完整性是可信的时，才使用此选项。
+
+从 Mercurial 下载
+这种模式非常直接，需要提供两个参数就可以了：
+```cmake
+FetchContent_Declare(dependency-id
+HG_REPOSITORY <url>
+HG_TAG <tag>
+)
+```
+最后，可以使用 CVS 来提供依赖项。
+从 CVS 下载
+要从 CVS 检出模块，需要提供以下三个参数：
+```cmake
+FetchContent_Declare(dependency-id
+CVS_REPOSITORY <cvsroot>
+CVS_MODULE <module>
+CVS_TAG <tag>
+)
+```
+
+更新和打补丁
+默认情况下，更新步骤将重新下载外部项目的文件，如果下载方法支持更新，例如：配置了指向 main 或 master 分支的 Git 依赖项。可以通过以下两种方式覆盖此行为：
+• 提供在更新期间执行的定制命令，使用 UPDATE_COMMAND <cmd>。
+• 完全禁用更新步骤（以允许在没有网络连接的情况下构建） –UPDATE_DISCONNECTED
+<bool>。请注意，依赖项仍然会在第一次构建时下载。
+
+可以链接更新和补丁命令
+
+```cmake
+FetchContent_Declare(dependency-id
+GIT_REPOSITORY <url>
+GIT_TAG <tag>
+UPDATE_COMMAND <cmd>
+PATCH_COMMAND <cmd>
+)
+```
+
+从版本 3.24 开始，CMake 引入了一个特性，允许 FetchContent 在依赖项已经本地可
+用时跳过下载。要启用此功能，只需在声明中添加 FIND_PACKAGE_ARGS 关键字：
+```cmake
+FetchContent_Declare(dependency-id
+GIT_REPOSITORY <url>
+GIT_TAG <tag>
+FIND_PACKAGE_ARGS <args>
+)
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(ExternalProjectGit CXX)
+
+add_executable(welcome main.cpp)
+configure_file(config.yaml config.yaml COPYONLY)
+
+include(FetchContent)
+FetchContent_Declare(external-yaml-cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG        0.8.0
+    FIND_PACKAGE_ARGS NAMES yaml-cpp
+)
+
+FetchContent_MakeAvailable(external-yaml-cpp)
+target_link_libraries(welcome PRIVATE yaml-cpp::yaml-cpp)
+
+include(CMakePrintHelpers)
+cmake_print_properties(TARGETS yaml-cpp::yaml-cpp
+                       PROPERTIES TYPE SOURCE_DIR
+                                  INTERFACE_INCLUDE_DIRECTORIES
+)
+```
+
+1. 添加了 FIND_PACKAGE_ARGS 和 NAMES 关键字，以指定正在寻找 yaml-cpp 包。如果
+没有 NAMES，CMake 会默认使用 dependency-id，在本例中为 external-yaml-cpp。
+2. 打印属性中添加了 INTERFACE_INCLUDE_DIRECTORIES。这是一次性检查，可以手动验
+证是否在使用已安装的包，或者是否下载了一个新的包。
+
+```cmake
+find_package(yaml-cpp QUIET)
+if (NOT TARGET yaml-cpp::yaml-cpp)
+# download missing dependency
+endif()
+```
+
+
+ExternalProject
+如 前 所 述， 在 FetchContent 引 入 CMake 之 前， 有 一 个 模 块 执 行 类 似 的 功 能：
+ExternalProject（在 3.0.0 版本中添加），用于从在线仓库获取外部项目。多年来，该模块逐渐扩展以满足不同的需求，导致 ExternalProject_Add() 命令变得相当复杂。
+ExternalProject 模块在构建阶段填充依赖项。这与 FetchContent 不同，后者在配置
+阶段执行。由于这个区别，ExternalProject 不能像 FetchContent 那样将目标导入项目。
+另一方面，ExternalProject 可以直接将依赖项安装到系统中，执行测试，以及其他事情，例如：覆盖配置和构建所使用的命令。
+
+```cmake
+nclude(ExternalProject)
+ ExternalProject_Add(external-yaml-cpp
+ GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+ GIT_TAG 0.8.0
+ INSTALL_COMMAND ""
+ TEST_COMMAND ""
+ )
+```
+
+它与 FetchContent_Declare 非常相似。示例中有两个关键字：INSTALL_COMMAND
+和 TEST_COMMAND。这个例子中，用于抑制依赖项的安装和测试，它们通常在构建期间执行。
+ExternalProject 执行许多步骤，这些步骤都可以进行深入的配置，并且按以下顺序执行：
+1. mkdir: 为外部项目创建一个子目录。
+2. download: 从仓库或 URL 下载项目文件。
+3. update: 如果 fetch 方法支持，则下载更新。
+4. patch : 执行一个修改下载文件的补丁命令。
+5. configure: 执行配置阶段。
+6. build: 为 CMake 项目执行构建阶段。
+7. install: 安装 CMake 项目。
+8. test: 执行测试。
+
+
+## 使用 C++20 模块
+
+
+
+
+
 
 
 
