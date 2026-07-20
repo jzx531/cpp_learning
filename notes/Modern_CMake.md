@@ -2955,6 +2955,288 @@ ExternalProject 执行许多步骤，这些步骤都可以进行深入的配置�
 
 ## 使用 C++20 模块
 
+模块解决了其中的许多问题，但一些问题仍然相关：模块与头文件一样，可以相互依赖。当一个模块导入另一个模块时，仍然需要按照正确的顺序编译它们，从最内层的模块开始。因为模块的尺寸往往要大得多，所以这通常不是一个大问题。许多情况下，整个库可以存储在单个模块中。
+
+这是从图片中提取的 CMake 代码及其详细解析。
+
+### 📝 提取的代码
+
+```cmake
+cmake_minimum_required(VERSION 3.26.0)
+project(CXXModules CXX)
+
+# turn on the experimental API
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28.0)
+    # Assume that C++ sources do import modules
+    cmake_policy(SET CMP0155 NEW)
+elseif(CMAKE_VERSION VERSION_GREATER_EQUAL 3.27.0)
+    set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API
+        "aa17df0-828a-4fcd-9afc-2dc80491aca7")
+elseif(CMAKE_VERSION VERSION_GREATER_EQUAL 3.26.0)
+    set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API
+        "2182bf5c-ef0d-489a-91da-49dbc3090d2a")
+    set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP 1)
+else()
+    message(FATAL_ERROR "Version lower than 3.26 not supported")
+endif()
+```
+
+---
+
+### 🔍 代码解析
+
+这段 `CMakeLists.txt` 的主要目的是**配置项目以支持 C++20 Modules（模块）**，并处理不同版本 CMake 之间的兼容性。由于 C++ Modules 在 CMake 中的支持经历了一个从"实验性"到"正式支持"的过程，因此代码中包含了大量的版本检查逻辑。
+
+#### 1. 基础配置
+*   `cmake_minimum_required(VERSION 3.26.0)`：指定构建此项目所需的最低 CMake 版本为 3.26。这是因为 C++ Modules 的实验性支持是从这个版本开始引入的。
+*   `project(CXXModules CXX)`：定义项目名称为 `CXXModules`，并指定主要语言为 C++。
+
+#### 2. 版本分支逻辑 (`if/elseif/else`)
+这段逻辑根据用户当前使用的 CMake 版本，采取不同的策略来启用 Modules 功能：
+
+*   **CMake >= 3.28.0 (正式支持阶段)**
+    *   `cmake_policy(SET CMP0155 NEW)`：这是最关键的一行。在 CMake 3.28 中，CMP0155 策略被引入。将其设置为 `NEW` 意味着告诉 CMake："我的源代码使用了 `import` 语句，请自动扫描并处理 C++ 模块依赖"。这标志着 Modules 支持从实验性走向了标准化，不再需要那些奇怪的哈希值变量。
+
+*   **CMake == 3.27.x (过渡阶段)**
+    *   `set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API "...")`：在 3.27 版本中，Modules 支持仍然是实验性的，但 API 哈希值发生了变化。这里设置了一个特定的 UUID 字符串，用于激活该版本的实验性功能。
+
+*   **CMake == 3.26.x (早期实验阶段)**
+    *   `set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API "...")`：这是最早的实验性 API 哈希值。
+    *   `set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP 1)`：启用动态依赖支持。在早期版本中，CMake 需要这个额外的开关来处理模块间的依赖关系扫描。
+
+*   **CMake < 3.26.0 (不支持)**
+    *   `message(FATAL_ERROR ...)`：如果 CMake 版本低于 3.26，直接报错停止构建，因为旧版本完全不具备处理 C++ Modules 的能力。
+
+### 💡 总结
+这段代码是一个典型的**兼容性模板**。它确保了无论开发者使用的是较新的 CMake 3.28+，还是稍旧的 3.26/3.27 版本，项目都能正确开启 C++ Modules 的支持，同时利用了新版本的简化特性（如 `CMP0155`）。
+
+声明一个CPP模块
+
+```cmake
+target_sources(math
+    PUBLIC FILE_SET CXX_MODULES TYPE CXX_MODULES FILES math.cppm
+)
+```
+要声明模块并将其与主程序链接,使用CMAKE配置
+
+```cmake
+add_library(math)
+target_sources(math
+    PUBLIC FILE_SET CXX_MODULES FILES math.cppm
+)
+
+target_compile_features(math PUBLIC cxx_std_20)
+set_target_properties(math PROPERTIES CXX_EXTENSIONS OFF)
+add_executable(main main.cpp)
+target_link_libraries(main PRIVATE math)
+```
+
+### 配置工具链
+
+根据 Kitware 网站上的博客文章（见“扩展阅读”部分），CMake 最早在 3.25 版本就支
+持模块功能。尽管 3.28 版本正式支持此功能，但这并不是我们要享受模块便利性的唯一拼图。
+下一个要求集中在构建系统上：需要支持动态依赖。截至目前，只有两个选择：
+• Ninja 1.11 及更新版本（Ninja 和 Ninja Multi-Config）
+• Visual Studio 17 2022 及更新版本
+同样，编译器需要以特定格式生成映射源依赖的文件，以供 CMake 使用。这种格式在 Kitware
+开发者撰写的一篇论文中有描述，这篇论文称为 p1589r5。该论文已提交给所有主流编译器以供
+实施。目前，只有以下三种编译器实现了所需的格式：
+• Clang 16
+• Visual Studio 2022 17.4 (19.34) 中的 MSVC
+• GCC 14（针对开发分支，2023 年 9 月 20 日之后）及更新版本
+假设环境中有所有必要的工具（可以使用为本书提供的 Docker 镜像），并且 Make 项目已
+准备好构建，剩下的就是配置 CMake 以使用所需的工具链。
+cmake -B <build tree> -S <source tree> -G "Ninja"
+此命令将配置项目以使用 Ninja 构建系统。下一步是设置编译器。如果默认编译器不支持
+模块，并且已安装了另一个编译器来尝试，可以通过定义全局变量 CMAKE_CXX_COMPILER 来实
+现，如下所示：
+cmake -B <build tree> -S <source tree> -G "Ninja" -D CMAKE_CXX_ COMPILER=clang++-18
+我们选择 Clang 18，因为它是撰写本文时（包含在 Docker 镜像中）可用的最新版本。成
+功配置后（会看到一些关于实验性功能的警告），需要构建项目：
+cmake --build <build tree>
+和往常一样，确保用适当的路径替换占位符 <build tree> 和 <source tree>。如果一
+切顺利，可以运行程序，观察模块功能按预期工作：
+$ ./main
+Addition 2 + 2 = 4
+就这样，C++20 模块在实际中得以应用。
+
+
+## 测试框架
+
+```sh
+cmake -B <build tree> -S <source tree>
+cmake --build <build tree>
+```
+
+构建并测试模式
+
+```sh
+ctest --build-and-test <source-tree> <build-tree>
+--build-generator <generator> [<options>...]
+[--build-options <opts>...]
+[--test-command <command> [<args>...]]
+```
+
+```sh
+ctest --build-and-test project/source-tree /tmp/build-tree --buildgenerator "Unix Makefiles"
+--test-command ctest
+```
+
+配置阶段的参数如下：
+• --build-options ——为 cmake 配置包含选项。在–-test-command 之前放置，必须
+放在最后。
+• --build-two-config ——对 CMake 运行两次配置阶段。
+• --build-nocmake ——跳过配置阶段。
+• --build-generator-platform ——提供生成器特定的平台。
+• --build-generator-toolset ——提供生成器特定的工具集。
+• --build-makeprogram ——为基于 Make 或 Ninja 的生成器指定 make 可执行文件。
+
+构建阶段的参数如下：
+• --build-target ——指定要构建的目标。
+• --build-noclean ——构建 clean 目标之前进行构建。
+• --build-project ——命名正在构建的项目。
+测试阶段的参数如下：
+• --test-timeout ——设置测试的时间限制，以秒为单位。
+
+测试模式
+
+CTest提供了-N选项,禁用执行并只打印列表
+
+```sh
+# ctest -N
+Test project /tmp/b
+Test #1: SumAddsTwoInts
+Test #2: MultiplyMultipliesTwoInts
+Total Tests: 2
+```
+
+CTest 还提供了一个使用 LABELS 关键字来分组测试的机制，列出所有可用的标签（无需实际执行测试），请使用--print-labels。这个选项在手动定义测试时非常有用，例如在列表文件中使用 add_test() 命令，然后就可以通过测试属性指定个别标签：
+```cmake
+set_tests_properties(<name> PROPERTIES LABELS "<label>")
+```
+
+这些标志将根据提供的正则表达式（regex）过滤测试：
+• -R <r>, --tests-regex <r> - 只运行 <r> 与匹配测试名称的测试
+• -E <r>, --exclude-regex <r> - 跳过与 <r> 匹配测试名称的测试
+• -L <r>, --label-regex <r> - 只运行与 <r> 匹配标签的测试
+• -LE <r>, --label-exclude <regex> - 跳过与 <r> 匹配标签的测试
+
+• -I 3„ 跳过测试 1 和 2（执行从第三个测试开始）
+• -I ,2, 只运行第一个和第二个测试
+• -I 2„3 每行运行第三个测试，从第二行开始
+• -I ,0„3,9,7 只运行第三个、第九个和第七个测试
+
+没有完美的方法来解决所有上述情况——可能的原因太多了。然而，我们可以通过多次运行它们并使用–repeat <mode>:<#>option 选项来增加识别易碎测试的机会。有三种模式可供选择：
+• until-fail ——运行测试 <#> 次；所有运行都必须通过。
+• until-pass ——最多运行测试 <#> 次；它必须至少通过一次。这适用于处理已知易碎但过于复杂和重要而无法调试或禁用的测试。
+• after-timeout ——最多运行测试 <#> 次，但仅在测试超时时才重试。在繁忙的测试环境中使用。
+
+要将日志存储在特定路径，请使用-O <file>, --output-log <file> 选项。如
+果输出过长，有两个限制选项可以限制每个测试的字节数：--test-output-size-passed和--test-output-size-failed <size>
+
+• -C <cfg>, --build-config <cfg> ——指定要测试的配置。调试配置通常具有调试符号，使事情更容易理解，因为重优化选项可能会影响 SUT 的行为，所以发布版本也应该测试。这个选项仅适用于多配置生成器。
+• -j <jobs>, --parallel <jobs> ——设置并行执行的测试数量。这对于加快长时间测试的执行非常有用。在繁忙的环境中（共享的测试运行器上），这可能会由于调度而产生不利影响。这可以通过下一个选项稍作缓解。
+• --test-load <level> ——以一种方式安排并行测试，使得 CPU 负载不超过值（尽最大努力）。
+• --timeout <seconds> ——指定单个测试的默认时间限制。
+
+
+```sh
+cmake_minimum_required(VERSION 3.26.0)
+project(NoFrameworkTests CXX)
+include(CTest)
+add_subdirectory(src bin)
+add_subdirectory(test)
+```
+
+```cmake
+add_executable(main main.cpp calc.cpp)
+```
+
+为test 目录创建一个列表文件:
+
+```cmake
+add_executable(unit_tests
+    unit_tests.cpp
+    calc_test.cpp
+    ../src/calc.cpp)
+target_include_directories(unit_tests PRIVATE ../src)
+add_test(NAME SumAddsTwoInts COMMAND unit_tests 1)
+add_test(NAME MultiplyMultiplesTwoInts COMMAND unit_tests 2)
+```
+
+• SumAddsTwoInts
+• MultiplyMultipliesTwoInts
+
+```cmake
+add_library(sut STATIC calc.cpp run.cpp)
+target_include_directories(sut PUBLIC .)
+add_executable(bootstrap bootstrap.cpp)
+target_link_libraries(bootstrap PRIVATE sut)
+```
+
+• calc.cpp: 将要进行单元测试的 Calc 类。这称为单元测试对象（UUT），因为 UUT 是SUT 的一个特化。
+• run.cpp: 原始入口点重命名为 run()，现在可以对其进行测试。
+• bootstrap.cpp: 新的 main() 入口点，调用 run()。
+• calc_test.cpp: 测试 Calc 类。
+• run_test.cpp: 新的 run() 测试可以放在这里。
+• unit_tests.o: 单元测试的入口点，扩展为调用 run() 的测试。
+
+现在是更新 unit_tests 目标的时候了。我们将替换对⋯/src/calc.cpp 文件的直接引用，改为对 sut 的链接引用，用于 unit_tests 目标，还将为 run_test.cpp 文件中的主函数添加一个新的测试。
+
+```cmake
+add_executable(unit_tests
+    unit_tests.cpp
+    calc_test.cpp
+    run_test.cpp)
+target_link_libraries(unit_tests PRIVATE sut)
+add_test(NAME SumAddsTwoInts COMMAND unit_tests 1)
+add_test(NAME MultiplyMultipliesTwoInts COMMAND unit_tests 2)
+add_test(NAME RunTest COMMAND unit_tests 3)
+```
+
+set(...)：CMake 中用于设置变量的命令。
+gtest_force_shared_crt：这是 GoogleTest 项目内部定义的一个缓存变量（cache variable），用于控制其编译时是否使用共享（动态）C 运行时库。
+ON：表示启用该选项，即“使用共享 CRT”。
+CACHE BOOL ""：
+CACHE：表示这是一个缓存变量，会写入 CMakeCache.txt 文件，可在 cmake-gui 或命令行中通过 -D 参数修改。
+BOOL：指定变量类型为布尔值（ON/OFF）。
+""：空字符串，表示在 GUI 中不显示描述文本。
+FORCE：强制覆盖缓存中已存在的同名变量值，确保无论用户之前如何设置，这里都会被重置为 ON
+
+以通过传递--gtest_brief=1 来限制它只显示失败信息
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
