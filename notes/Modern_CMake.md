@@ -3205,7 +3205,35 @@ FORCE：强制覆盖缓存中已存在的同名变量值，确保无论用户之
 
 以通过传递--gtest_brief=1 来限制它只显示失败信息
 
+```cmake
+function(AddCoverage target)
+    find_program(LCOV_PATH lcov REQUIRED)
+    find_program(GENHTML_PATH genhtml REQUIRED)
 
+    add_custom_target(coverage
+        COMMENT "Running coverage for ${target}..."
+        COMMAND ${LCOV_PATH} -d . --zerocounters
+        COMMAND $<TARGET_FILE:${target}>
+        COMMAND ${LCOV_PATH} -d . --capture -o coverage.info
+        COMMAND ${LCOV_PATH} -r coverage.info '/usr/include/*'
+                -o filtered.info
+        COMMAND ${GENHTML_PATH} -o coverage filtered.info
+                --legend
+        COMMAND rm -rf coverage.info filtered.info
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+endfunction()
+```
+
+避免 SEGFAULT 陷阱
+开始编辑此类构建解决方案的源代码时，可能会陷入麻烦。这是因为覆盖信息分割成了两部分：
+• gcno 文件，即 GNU 覆盖笔记，在 SUT 的编译过程中生成
+• gcda 文件，即 GNU 覆盖数据，在测试运行期间生成和更新
+“更新”功能可能是段错误的一个潜在来源，在最初运行测试后，留下了一堆没有移除的 gcda文件。如果我们对源代码进行一些更改并重新编译对象文件，将创建新的 gcno 文件。但是，没有擦除步骤——之前的测试运行生成的 gcda 文件会跟随过时的源码。当执行 unit_tests 二进制文件（这在 gtest_discover_tests 宏中发生）时，覆盖信息文件将不匹配，将会收到一个 SEGFAULT（段错误）错误。
+为了避免这个问题，我们应该清除任何过时的 gcda 文件。由于 sut 实例是一个 STATIC
+库，可以将 add_custom_command(TARGET) 命令与构建事件挂钩，清理将在重新构建开始前执行。
+
+## 程序分析工具
 
 
 
