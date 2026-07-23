@@ -3235,41 +3235,634 @@ endfunction()
 
 ## 程序分析工具
 
+format.cmake
+```cmake
+function(format_target target directory)
+    # 查找 clang-format
+    find_program(CLANG_FORMAT_PATH clang-format REQUIRED)
+
+    # 定义需要匹配的文件后缀
+    set(EXPRESSION h hpp hh c cc cxx cpp)
+    # 拼接成 glob 表达式，例如: src/*.h
+    list(TRANSFORM EXPRESSION PREPEND "${directory}/*.")
+
+    # 递归查找源文件
+    file(GLOB_RECURSE SOURCE_FILES 
+         LIST_DIRECTORIES false 
+         FOLLOW_SYMLINKS 
+         ${EXPRESSION}
+    )
+
+    # 在目标构建完成后，自动执行格式化
+    add_custom_command(
+        TARGET ${target} 
+        POST_BUILD  # 修正了 E_BUILD -> POST_BUILD
+        COMMAND ${CLANG_FORMAT_PATH} -i --style=file ${SOURCE_FILES}
+        COMMENT "Formatting source files in ${directory}..."
+    )
+endfunction()
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(Formatting CXX)
+enable_testing()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+add_subdirectory(src bin)
+
+add_executable(main main.cpp)
+include(Format)
+Format(main .)
+```
+
+CMake 允许按目标启用以下检查器：
+• include-what-you-use (https://include-what-you-use.org)
+• clang-tidy (https://clang.llvm.org/extra/clang-tidy)
+• Link What You Use (CMake 内置检查器)
+• Cpplint (https://github.com/cpplint/cpplint)
+• Cppcheck (https://cppcheck.sourceforge.io)
+
+要启用这些检查器，请将目标属性设置为以分号分隔的列表，其中包含检查器可执行文件的路
+径和要转发的命令行选项：
+• <LANG>_CLANG_TIDY
+• <LANG>_CPPCHECK
+• <LANG>_CPPLINT
+• <LANG>_INCLUDE_WHAT_YOU_USE
+• LINK_WHAT_YOU_USE
+
+ClangTidy.cmake
+
+```cmake
+function(AddClangTidy target)
+    find_program(CLANG-TIDY_PATH clang-tidy REQUIRED)
+    set_target_properties(${target}
+       PROPERTIES CXX_CLANG_TIDY
+       "${CLANG-TIDY_PATH};-checks=*;--warnings-as-errors=*"
+       )
+endfunction()
+```
+1. 定位 clang-tidy 二进制文件并将其路径存储在 CLANG-TIDY_PATH 中。REQUIRED 关键字在找不到二进制文件时，配置将停止并报错。
+2. 通过提供二进制路径和特定选项来为目标启用 clang-tidy，以激活所有检查并将警告视为错误。
+
+```cmake
+add_library(sut STATIC calc.cpp run.cpp)
+target_include_directories(sut PUBLIC .)
+add_executable(bootstrap bootstrap.cpp)
+target_link_libraries(bootstrap PRIVATE sut)
+include(ClangTidy)
+AddClangTidy(sut)
+```
+include-what-you-use 的 主 要 目 标 是 移 除 多 余 的 #include。 通 过 确 定 哪 些#include 实际上不需要此文件（对于.cc 和.h 文件），并在可能的情况下用前向声明替换 #include 来实现。
+
+Valgrind（https://www.valgrind.org）是一个用于构建动态分析工具的 *nix 仪器化框架，可以在程序运行时执行分析。它附带了一系列工具，用于各种类型的调查和检查。其中一些工具包括：
+• Memcheck: 检测内存管理问题
+• Cachegrind: 分析 CPU 缓存，识别缓存未命中和其他问题
+• Callgrind: Cachegrind 的扩展，提供关于调用图的额外信息
+• Massif: 堆分析器，显示程序的不同部分随时间如何使用堆
+• Helgrind: 用于数据竞争问题的线程调试器
+• DRD: Helgrind 的一个更轻量级、功能更有限的版本
+
+Memcheck 对于调试内存问题非常有价值，这个问题在 C++ 中可能特别复杂。开发者对内存管理有控制权，可能会犯各种错误。这些错误可能包括读取未分配的或已释放的内存，多次释放内存，甚至写入错误的地址。这些错误很容易被忽视，甚至潜入到最简单的程序中。有时，只是一个遗忘的变量初始化就足以遇到麻烦。
 
 
+这段代码是一个 **CMake 自定义函数**，用于为 C/C++ 项目中的目标程序添加 **Valgrind 内存检查**功能。下面为你提取代码并逐行解析：
+
+### 代码提取
+
+```cmake
+function(AddValgrind target)
+    find_program(VALGRIND_PATH valgrind REQUIRED)
+    add_custom_target(valgrind
+        COMMAND ${VALGRIND_PATH} --leak-check=yes
+            $<TARGET_FILE:${target}>
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+endfunction()
+```
+
+---
+
+### 逐行解析
+
+#### `function(AddValgrind target)`
+
+- 定义一个名为 `AddValgrind` 的 CMake 函数，接受一个参数 `target`（即你要检查内存泄漏的可执行文件目标名）。
+
+#### `find_program(VALGRIND_PATH valgrind REQUIRED)`
+
+- 在系统中查找 `valgrind` 可执行文件的路径，并将其保存到变量 `VALGRIND_PATH` 中。
+- `REQUIRED` 表示如果找不到 `valgrind`，CMake 配置阶段会直接报错终止。
+
+#### `add_custom_target(valgrind ...)`
+
+- 创建一个名为 `valgrind` 的自定义构建目标。之后你可以通过 `make valgrind` 或 `ninja valgrind` 来触发它。
+
+#### `COMMAND ${VALGRIND_PATH} --leak-check=yes $<TARGET_FILE:${target}>`
+
+- 这是实际执行的命令：
+  - `${VALGRIND_PATH}`：前面找到的 valgrind 路径。
+  - `--leak-check=yes`：开启内存泄漏检测。
+  - `$<TARGET_FILE:${target}>`：CMake 生成器表达式，会自动展开为指定目标编译后的可执行文件的完整路径。
+
+#### `WORKING_DIRECTORY ${CMAKE_BINARY_DIR}`
+
+- 设置运行 valgrind 时的工作目录为 CMake 的二进制输出目录（即构建目录），确保程序能找到同目录下的资源文件或动态库。
+
+#### `endfunction()`
+
+- 结束函数定义。
+
+---
+
+### 使用方法
+
+在你的 `CMakeLists.txt` 中这样使用：
+
+```cmake
+# 先包含这个函数所在的 .cmake 文件，或者直接写在 CMakeLists.txt 里
+include(AddValgrind.cmake) # 假设函数保存在该文件中
+
+# 定义你的可执行目标
+add_executable(my_app main.cpp)
+
+# 调用函数，为 my_app 添加 valgrind 检查目标
+AddValgrind(my_app)
+```
+
+然后在终端执行：
+
+```bash
+cmake --build . --target valgrind
+# 或者
+make valgrind
+```
+
+即可对 `my_app` 进行内存泄漏检查。
+
+---
+
+### ⚠️ 注意事项
+
+1. **依赖 Valgrind**：系统必须安装 `valgrind`，否则 CMake 配置会失败。
+2. **仅适用于 Linux/macOS**：Valgrind 不支持 Windows（Windows 下可用 Dr. Memory 或 Visual Studio 内置工具替代）。
+3. **性能影响**：Valgrind 会使程序运行速度降低 10~50 倍，仅用于调试阶段。
+4. **扩展建议**：可增加参数如 `--track-origins=yes` 追踪未初始化变量的来源，或 `--tool=memcheck` 显式指定工具。
+
+这个函数封装简洁实用，适合集成到 CI/CD 流程中自动检测内存问题。
+
+## 生成文档
+
+Doxygen 可以生成以下格式的文档：
+• 超文本标记语言 (HTML)
+• 富文本格式 (RTF)
+• 可移植文档格式 t (PDF)
+• Lamport TeX (LaTeX)
+• PostScript (PS)
+• Unix 手册 (man 页面)
+• 微软 HTML 帮助手册 (.CHM)
+
+```cmake
+function(Doxygen input output)
+    find_package(Doxygen)
+    if (NOT DOXYGEN_FOUND)
+        add_custom_target(doxygen COMMAND false
+            COMMENT "Doxygen not found")
+        return()
+    endif()
+
+    set(DOXYGEN_GENERATE_HTML YES)
+    set(DOXYGEN_HTML_OUTPUT
+        ${PROJECT_BINARY_DIR}/${output})
+
+    doxygen_add_docs(doxygen
+        ${PROJECT_SOURCE_DIR}/${input}
+        COMMENT "Generate HTML documentation"
+    )
+endfunction()
+```
+
+1. 首先，使用 CMake 内置的 Doxygen 查找模块来确定，系统中是否可用 Doxygen。
+2. 如果不可用，创建一个虚拟的 doxygen 目标，通知用户并运行 false 命令（在类 Unix系统中返回 1，导致构建失败）。我们在此处用 return() 终止函数。
+3. 如果 Doxygen 可用，将其配置为在提供的输出目录中生成 HTML 输出。Doxygen 非常可配置（更多信息请参阅官方文档）。要设置任何选项，只需按照示例调用 set()，并在其名称前加上 DOXYGEN_。
+4. 设置实际的 doxygen 目标。所有 DOXYGEN_变量都将被转发到 Doxygen 的配置文件中，并将从源树中提供的输入目录生成文档。
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(Doxygen CXX)
+
+enable_testing()
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+add_subdirectory(src bin)
+
+include(Doxygen)
+Doxygen(src docs)
+```
+
+```cmake
+macro(UseDoxygenAwesomeCss)
+    include(FetchContent)
+    FetchContent_Declare(doxygen-awesome-css
+        GIT_REPOSITORY
+            https://github.com/jothepro/doxygen-awesome-css.git
+        GIT_TAG
+            V2.3.1
+    )
+    FetchContent_MakeAvailable(doxygen-awesome-css)
+    set(DOXYGEN_GENERATE_TREEVIEW YES)
+    set(DOXYGEN_HAVE_DOT YES)
+    set(DOXYGEN_DOT_IMAGE_FORMAT svg)
+    set(DOXYGEN_DOT_TRANSPARENT YES)
+    set(DOXYGEN_HTML_EXTRA_STYLESHEET
+        ${doxygen-awesome-css_SOURCE_DIR}/doxygen-awesome.css)
+endmacro()
+```
+
+1. 使用 FetchContent 模块从 Git 获取 doxygen-awesome-css
+2. 为 Doxygen 配置额外的选项（这些选项特别由主题的 README 文件推荐）
+3. 将主题的 css 文件复制到 Doxygen 的输出目录
+
+## 安装与打包
+
+导出而不安装
+
+```cmake
+export(TARGETS [target1 [target2 [...]]]
+[NAMESPACE <namespace>] [APPEND] FILE <path>
+[EXPORT_LINK_INTERFACE_LIBRARIES]
+)
+```
+• NAMESPACE 推荐用来指示目标是从其他项目导入的。
+• APPEND 防止 CMake 在写入前清除文件内容。
+• EXPORT_LINK_INTERFACE_LIBRARIES 导出目标的链接依赖项（包括导入的和特定配置的变体）。
+
+```cmake
+add_library(calc STATIC basic.cpp)
+target_include_directories(calc INTERFACE include)
+```
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(ExportCalcCXX)
+add_subdirectory(src bin)
+set(EXPORT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cmake")
+export(TARGETS calc
+FILE "${EXPORT_DIR}/CalcTargets.cmake"
+NAMESPACE Calc::
+)
+```
+
+```cmake
+install(TARGETS calc EXPORT CalcTargets)
+export(EXPORT CalcTargets
+    FILE "${EXPORT_DIR}/CalcTargets2.cmake"
+    NAMESPACE Calc::
+)
+```
+
+```cmake
+add_library(Calc::calc STATIC IMPORTED)
+set_target_properties(Calc::calc PROPERTIES
+INTERFACE_INCLUDE_DIRECTORIES
+"/<source-tree>/include"
+)
+# Import target "Calc::calc" for configuration ""
+set_property(TARGET Calc::calc APPEND PROPERTY
+   IMPORTED_CONFIGURATIONS NOCONFIG
+)
+
+set_property(TARGET Calc::calc APPEND PROPERTY
+   IMPORTED_CONFIGURATIONS NOCONFIG)
+
+set_target_properties(Calc::calc PROPERTIES
+    IMPORTED_LINK_INTERFACE_LANGUAGES_NOCONFIG "CXX"
+    IMPORTED_LOCATION_NOCONFIG "/<build-tree>/libcalc.a"
+)
+```
+
+安装项目
+
+```cmake
+cmake --install <dir> [<options>]
+```
+
+• --config <cfg>: 这用于为多配置生成器选择构建配置。
+• --component <comp>: 这将安装限制在给定的组件内。
+• --default-directory-permissions <permissions>: 这为安装的目录设置默认权限（格式为 <u=rwx,g=rx,o=rx>）。
+• --install-prefix <prefix>: 这 指 定 非 默 认 的 安 装 路 径 （在
+CMAKE_INSTALL_PREFIX 变量中） 。在类 Unix 系统中默认为/usr/local，在
+Windows 中默认为 C:/Program Files/${PROJECT_NAME}。在 CMake 3.21 之前，需要使用一个不太明确的选项：--prefix <prefix>.
+• -v, --verbose: 这增加了输出信息的详细程度（也可以通过设置 VERBOSE 环境变量实现）。
+安装通常涉及将生成的工件和必要的依赖项复制到系统目录。使用 CMake 为所有 CMake 项目引入了一个方便的安装标准：
+• 为不同类型的工件提供特定于平台的安装路径（遵循 GNU 编码标准）。
+• 通过生成目标导出文件来增强安装过程，允许其他项目直接重用项目目标。
+• 通过配置文件创建可发现的包，包装目标导出文件和作者定义的特定于包的 CMake 宏和函数。
+
+• install(TARGETS): 这安装输出工件，如库和可执行文件。
+• install(FILES|PROGRAMS): 这安装单个文件并设置它们的权限。这些文件不需要是逻辑目标的一部分。
+• install(DIRECTORY): 这安装整个目录。
+• install(SCRIPT|CODE): 这在安装过程中运行 CMake 脚本或代码片段。
+• install(EXPORT): 这生成并安装目标导出文件。
+• install(RUNTIME_DEPENDENCY_SET <set-name> [...]): 这安装项目中定义的运行时依赖项集。
+• install(IMPORTED_RUNTIME_ARTIFACTS <target>... [...]): 这查询导入的目标以获取运行时工件并安装它们。
+
+• DESTINATION: 这指定安装路径。相对路径会以 CMAKE_INSTALL_PREFIX 为前缀，而绝对路径会按原样使用（并且不受 cpack 支持）。
+• PERMISSIONS: 这 在 支 持 的 平 台 设 置 文 件 权 限。 可 用 的 值 包 括 OWNER_READ,OWNER_WRITE, OWNER_EXECUTE, GROUP_READ, GROUP_WRITE, GROUP_ EXECUTE,
+WORLD_READ, WORLD_WRITE, WORLD_EXECUTE, SETUID 和 SETGID。安装时创建的默认目录权限可以通过 CMAKE_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS 变量来设置。
+• CONFIGURATIONS: 这指定配置（Debug，Release）。跟随此关键字的选项仅当当前构建配置在列表中时才适用。
+• OPTIONAL: 避免安装文件不存在时出现错误。
+
+安装逻辑目标
+
+```cmake
+install(TARGETS <target>... [EXPORT <export-name>]
+    [<output-artifact-configuration> ...]
+    [INCLUDES DESTINATION <dir>]
+)
+```
+[<output-artifact-configuration>...] 提供了一个配置块列表。
+<TYPE> [DESTINATION <dir>]
+[PERMISSIONS permissions...]
+[CONFIGURATIONS [Debug|Release|...]]
+[COMPONENT <component>]
+[NAMELINK_COMPONENT <component>]
+[OPTIONAL] [EXCLUDE_FROM_ALL]
+[NAMELINK_ONLY|NAMELINK_SKIP]
+
+• ARCHIVE: 静态库（.a）和 Windows 系统上的 DLL 导入库（.lib）。
+• LIBRARY: 共享库（.so），但不包括 DLL。
+• RUNTIME: 可执行文件和 DLL。
+• OBJECTS: 来自 OBJECT 库的对象文件。
+• FRAMEWORK: 设置了 FRAMEWORK 属性的静态和共享库（从 ARCHIVE 和 LIBRARY 中排除），是 macOS 特定的。
+• BUNDLE: 标记有 MACOSX_BUNDLE 的可执行文件（也不属于 RUNTIME）。
+• FILE_SET <set>: 指定给目标的文件集 <set> 中的文件。可以是 C++ 头文件或 C++模块头文件（自 CMake 3.23 起）。
+• PUBLIC_HEADER, PRIVATE_HEADER, RESOURCE: 在目标属性中指定相同名称的文件（在 Apple 平台上，应该设置在 FRAMEWORK 或 BUNDLE 目标上）。
+
+${CMAKE_INSTALL_PREFIX} + ${DESTINATION}
+
+| 工件类型 | 内置默认值 | 安装目录变量 |
+| :--- | :--- | :--- |
+| RUNTIME | `bin` | `CMAKE_INSTALL_BINDIR` |
+| LIBRARY<br>ARCHIVE | `lib` | `CMAKE_INSTALL_LIBDIR` |
+| PUBLIC_HEADER<br>PRIVATE_HEADER<br>FILE_SET (类型 HEADERS) | `include` | `CMAKE_INSTALL_INCLUDEDIR` |
+
+```cmake
+arget_sources(<target>
+[<PUBLIC|PRIVATE|INTERFACE>
+[FILE_SET <name> TYPE <type> [BASE_DIR <dir>] FILES]
+<files>...
+]...
+)
+
+add_library(calc STATIC basic.cpp)
+target_include_directories(calc INTERFACE include)
+target_sources(calc PUBLIC FILE_SET HEADERS
+    BASE_DIRS include
+    FILES include/calc/basic.h
+)
+
+include(GNUInstallDirs)
+install(TARGETS calc ARCHIVE FILE_SET HEADERS)
+```
+
+```cmake
+add_library(calc STATIC basic.cpp)
+target_include_directories(calc INTERFACE include)
+set_target_properties(calc PROPERTIES
+    PUBLIC_HEADER src/include/calc/basic.h
+)
+```
+
+```cmake
+include(GNUInstallDirs)
+install(TARGETS calc
+    ARCHIVE
+    PUBLIC_HEADER
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/calc
+)
+```
+
+使用 install(FILES) 和 install(PROGRAMS) 安装
+FILES 和 PROGRAMS 模式非常相似，可以用来安装各种资产，包括公共头文件、文档、shell脚本、配置，以及像图像、音频文件和数据集这样的运行时资源。
+以下是命令签名：
+
+```cmake
+install(<FILES|PROGRAMS> files...
+TYPE <type> | DESTINATION <dir>
+[PERMISSIONS permissions...]
+[CONFIGURATIONS [Debug|Release|...]]
+[COMPONENT <component>]
+[RENAME <name>] [OPTIONAL] [EXCLUDE_FROM_ALL]
+)
+```
+
+${CMAKE_INSTALL_PREFIX} + ${DESTINATION}
 
 
+| 文件类型 | 内置默认值 | 安装目录变量 |
+| :--- | :--- | :--- |
+| BIN | `bin` | `CMAKE_INSTALL_BINDIR` |
+| SBIN | `sbin` | `CMAKE_INSTALL_SBINDIR` |
+| LIB | `lib` | `CMAKE_INSTALL_LIBDIR` |
+| INCLUDE | `include` | `CMAKE_INSTALL_INCLUDEDIR` |
+| SYSCONF | `etc` | `CMAKE_INSTALL_SYSCONFDIR` |
+| SHAREDSTATE | `com` | `CMAKE_INSTALL_SHAREDSTATEDIR` |
+| LOCALSTATE | `var` | `CMAKE_INSTALL_LOCALSTATEDIR` |
+| RUNSTATE | `$LOCALSTATE/run` | `CMAKE_INSTALL_RUNSTATEDIR` |
+| DATA | `$DATAROOT` | `CMAKE_INSTALL_DATADIR` |
+| INFO | `$DATAROOT/info` | `CMAKE_INSTALL_INFODIR` |
+| LOCALE | `$DATAROOT/locale` | `CMAKE_INSTALL_LOCALEDIR` |
+| MAN | `$DATAROOT/man` | `CMAKE_INSTALL_MANDIR` |
+| DOC | `$DATAROOT/doc` | `CMAKE_INSTALL_DOCDIR` |
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(InstallFiles CXX)
+
+include(GNUInstallDirs)
+
+install(FILES
+    src/include/calc/basic.h
+    src/include/calc/nested/calc_extended.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/calc
+)
+```
+
+处理整个目录
+
+```cmake
+install(DIRECTORY dirs...
+TYPE <type> | DESTINATION <dir>
+[FILE_PERMISSIONS permissions...]
+[DIRECTORY_PERMISSIONS permissions...]
+[USE_SOURCE_PERMISSIONS] [OPTIONAL] [MESSAGE_NEVER]
+[CONFIGURATIONS [Debug|Release|...]]
+[COMPONENT <component>] [EXCLUDE_FROM_ALL]
+[FILES_MATCHING]
+[[PATTERN <pattern> | REGEX <regex>] [EXCLUDE]
+[PERMISSIONS permissions...]] [...]
+)
+```
+
+install(DIRECTORY aaa DESTINATION /xxx)
+
+install(DIRECTORY aaa/ DESTINATION /xxx)
+
+关于权限，install(DIRECTORY) 支持三个选项：
+• USE_SOURCE_PERMISSIONS 设置安装文件的原有文件权限，只有在 FILE_PERMISSIONS未设置时才有效。
+• FILE_PERMISSIONS 允 许 指 定 为 安 装 的 文 件 和 目 录 设 置 的 权 限， 默 认 权 限 是OWNER_WRITE、OWNER_READ、GROUP_READ 和 WORLD_READ。
+• DIRECTORY_PERMISSIONS 与 FILE_PERMISSIONS 类似，但它将为所有用户设置
+EXECUTE 权限（这是因为 Unix-like 系统中目录的 EXECUTE 权限表示列出其内容的权限）。
+
+• 使用 PATTERN，这是更简单的选项，可以提供一个带有? 占位符（匹配任何字符）和 * 通配符（匹配任何字符串）的模式。只有以结尾的路径才会匹配。
+• REGEX 选项更高级，支持正则表达式。允许匹配路径的部分，尽管 ^ 和 $ 锚点仍然可以表示路径的开始和结束。可选地，第一个过滤器之前可以设置 FILES_MATCHING 关键字，指定过滤器将应用于文件而不是目录。请记住两个事项：
+• FILES_MATCHING 需要一个包容性过滤器。可以排除一些文件，但如果不同时包含一些文件，则不会有文件被复制。然而，所有目录都将创建，无论如何过滤。
+• 所有子目录默认都会包含，只能过滤掉。
+
+```cmake
+cmake_minimum_required(VERSION 3.26)
+project(InstallDirectories CXX)
+install(DIRECTORY data/ DESTINATION share/calc)
+```
+
+如果曾在类 Unix 系统上安装过共享库，可能会记得需要指导动态链接器扫描可信目录，并
+使用 ldconfig 构建其缓存（请参阅扩展阅读部分以获取参考文章）。
+install([[SCRIPT <file>] [CODE <code>]]
+[ALL_COMPONENTS | COMPONENT <component>]
+[EXCLUDE_FROM_ALL] [...]
+)
 
 
+### 创建可重用的包
+
+1. 使目标可重定位。
+2. 将目标导出文件安装到标准位置。
+3. 为该包创建一个配置文件。
+4. 为该包生成一个版本文件。
+
+• $<BUILD_INTERFACE:...>: 常规构建中评估为’⋯’ 参数，但在安装时排除它。
+• $<INSTALL_INTERFACE:...>: 安装时评估为’⋯’ 参数，但在常规构建时排除它。
+• $<BUILD_LOCAL_INTERFACE:...>: 当在同一构建系统中的另一个目标使用时评估为’
 
 
+```cmake
+add_library(calc STATIC basic.cpp)
+target_include_directories(calc INTERFACE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+set_target_properties(calc PROPERTIES
+    PUBLIC_HEADER "include/calc/basic.h"
+)
+```
+关 于 CMAKE_INSTALL_PREFIX： 不 应 将 其 用 作 目 标 中 指 定 的 路 径 的 组 成 部 分。 将 在
+构 建 阶 段 进 行 计 算， 使 路 径 变 为 绝 对 路 径， 可 能 与 安 装 阶 段 提 供 的 路 径 不 同 （如 果 使 用
+了--install-prefix 选项）。相反，使用 $<INSTALL_PREFIX> 生成器表达式：
+```cmake
+target_include_directories(my_target PUBLIC
+$<INSTALL_INTERFACE:$<INSTALL_PREFIX>/include/MyTarget>
+)
+```
+或者，可以使用相对路径，将与正确的安装前缀前置：
+```cmake
+target_include_directories(my_target PUBLIC
+$<INSTALL_INTERFACE:include/MyTarget>
+)
+```
 
+安装目标导出文件
 
+```cmake
+install(EXPORT <export-name> DESTINATION <dir>
+ [NAMESPACE <namespace>] [[FILE <name>.cmake]|
+ [PERMISSIONS permissions...]
+ [CONFIGURATIONS [Debug|Release|...]]
+ [EXPORT_LINK_INTERFACE_LIBRARIES]
+ [COMPONENT <component>]
+ [EXCLUDE_FROM_ALL])
+ ```
 
+ 该命令将创建并安装一个命名导出，该导出必须使用 install(TARGETS) 命令定义。这里的关键区别是，生成的导出文件将包含使用 INSTALL_INTERFACE 生成器表达式计算的目标路径，这与 export(EXPORT) 不同，后者使用 BUILD_INTERFACE
 
+ 这是从图片中提取的 CMake 代码及其详细解析。这段代码展示了 **CMake 3.23+** 引入的现代特性——**文件集 (File Sets)**，用于更优雅地管理头文件和安装规则。
 
+### 📝 代码提取
 
+```cmake
+add_library(calc STATIC basic.cpp)
+target_sources(calc
+    PUBLIC FILE_SET HEADERS BASE_DIRS include
+    FILES "include/calc/basic.h"
+)
 
+include(GNUInstallDirs)
+install(TARGETS calc EXPORT CalcTargets ARCHIVE FILE_SET HEADERS)
+install(EXPORT CalcTargets
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/calc/cmake
+    NAMESPACE Calc::
+)
+```
 
+---
 
+### 🔍 代码详细解析
 
+这段代码的核心在于使用 `FILE_SET` 替代了传统的 `PUBLIC_HEADER` 属性或手动编写复杂的 `install(FILES ...)` 命令。
 
+#### 1. 定义源文件与头文件集合
 
+```cmake
+target_sources(calc
+    PUBLIC FILE_SET HEADERS BASE_DIRS include
+    FILES "include/calc/basic.h"
+)
+```
 
+- **`target_sources`**: 传统上只用于添加 `.cpp` 文件，现在也可以用来管理头文件。
+- **`PUBLIC FILE_SET HEADERS`**:
+    - 定义了一个名为 `HEADERS` 的文件集（名字可以自定义，但 `HEADERS` 是约定俗成的）。
+    - `PUBLIC` 表示这些头文件不仅库内部使用，使用者也需要包含它们。
+- **`BASE_DIRS include`**: **关键设置**。它指定了路径计算的基准目录。这意味着在安装时，CMake 会保留 `include` 目录之后的相对路径结构。
+- **`FILES "include/calc/basic.h"`**: 指定具体的头文件路径。结合上面的 `BASE_DIRS include`，安装后的相对路径将是 `calc/basic.h`。
 
+> **💡 优势**：这种方式自动处理了头文件的目录层级结构，不再需要手动写多条 `install(FILES ... DESTINATION ...)` 命令来维持文件夹结构。
 
+#### 2. 安装目标与文件集
 
+```cmake
+install(TARGETS calc EXPORT CalcTargets ARCHIVE FILE_SET HEADERS)
+```
 
+- **`TARGETS calc`**: 声明要安装的目标。
+- **`EXPORT CalcTargets`**: 将此目标加入到一个名为 `CalcTargets` 的导出集中。这会生成一个 `.cmake` 文件，记录如何导入这个库（包括它的链接依赖、包含路径等）。
+- **`ARCHIVE`**: 显式指定安装静态库文件（即 `.a` 或 `.lib`）。
+- **`FILE_SET HEADERS`**: **自动安装头文件**。CMake 会根据之前定义的 `FILE_SET` 信息，自动将头文件复制到正确的安装目录（通常是 `${CMAKE_INSTALL_INCLUDEDIR}`），并保持相对路径结构。
 
+#### 3. 安装导出配置文件
 
+```cmake
+install(EXPORT CalcTargets
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/calc/cmake
+    NAMESPACE Calc::
+)
+```
 
+- **`EXPORT CalcTargets`**: 实际执行导出集的物理文件安装。
+- **`DESTINATION .../calc/cmake`**: 指定生成的 `CalcTargets.cmake` 等配置文件的存放位置。这通常是下游项目使用 `find_package(Calc)` 时搜索的路径。
+- **`NAMESPACE Calc::`**: 为导出的目标添加命名空间前缀。
+    - 安装后，其他项目链接时将使用 `Calc::calc` 而不是 `calc`。
+    - **作用**：如果找不到该库，CMake 会直接报错（因为找不到 `Calc::calc`），而不是误以为是一个名为 `calc` 的普通字符串参数，从而提供更清晰的错误提示。
 
+1. 自动化：不需要手动同步头文件的源路径和安装路径，FILE_SET 帮你搞定。
+2. 结构化：完美保留了头文件的子目录结构（例如 calc/basic.h）。
+3. 现代化：配合 EXPORT 和 NAMESPACE，生成的包完全符合现代 CMake 的导入标准，对使用者非常友好。
 
-
-
-
-
-
+用户可以使用以下命令，在系统上的任何位置安装包：
+```sh
+# cmake --install <build tree> --install-prefix=<path>
+```
+• 目标属性上的路径是可重定位的。
+• 配置文件中使用的路径相对于它。
 
 
 
