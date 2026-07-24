@@ -4111,8 +4111,52 @@ cpack [<options>]
 • --vendor <vendorName>: 此选项覆盖包供应商。
 • -B <packageDirectory>: 此选项指定 cpack 的输出目录（默认情况下，这将是当前工作目录）。
 
+```cmake
+add_library(calc_console_static STATIC tui.cpp)
+target_include_directories(calc_console_static PUBLIC include)
+target_precompile_headers(calc_console_static PUBLIC <string>)
+
+include(GetFTXUI)
+target_link_libraries(calc_console_static PUBLIC calc_shared
+    ftxui::screen ftxui::dom ftxui::component
+)
+
+include(BuildInfo)
+BuildInfo(calc_console_static)
+
+# ... instrumentation of calc_console_static for coverage
+# ... testing and program analysis modules
+# ... documentation generation
+
+add_executable(calc_console bootstrap.cpp)
+target_link_libraries(calc_console calc_console_static)
+
+# ... installation
+```
+1. 定义 calc_console_static 目标，包含不含 main() 函数的业务代码，以允许与具有自己入口点的 GTest 链接。
+2. 配置包含目录。可以通过 FILE_SET 逐个添加头文件，但由于其是内部的，这里简化了这一步骤。
+3. 实现头文件预编译，这里以 <string> 头文件为例演示，虽然大型项目可能会包含更多的头文件。
+4. 包含一个自定义的 CMake 模块来获取 FTXUI 依赖项。
+5. 将业务代码与 calc_shared 共享库和 FTXUI 组件链接起来。
+6. 添加一个自定义模块来生成构建信息，并将其嵌入到工件中。
+7. 概述了针对此目标的其他步骤：coverage 配置、测试、程序分析和文档生成。
+8. 创建并链接 calc_console 引导可执行文件，建立入口点。
+9. 概述安装过程。
 
 
+编写预设文件
+
+其格式是一个 JSON
+对象，包含以下键：
+• version: 这是一个必需的整数，指定了预设 JSON 架构的版本。
+• cmakeMinimumRequired: 这是一个对象，指定了所需的 CMake 版本。
+• include: 这是一个字符串数组，从数组中提供的文件路径包含外部预设（自第 4 版架构
+开始）。
+• configurePresets: 这是一个对象数组，定义了配置阶段的预设。
+• buildPresets: 这是一个对象数组，定义了构建阶段的预设。
+• testPresets: 这是一个对象数组，专门针对测试阶段的预设。
+• packagePresets: 这是一个对象数组，专门针对打包阶段的预设。
+• workflowPresets: 这是一个对象数组，专门针对工作流模式的预设。
 
 
 
